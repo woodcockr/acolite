@@ -1155,11 +1155,13 @@ def acolite_l2r(gem,
 
         dsi = gem.bands[b]['rhot_ds']
         dso = gem.bands[b]['rhos_ds']
-        cur_data, cur_att = gem.data(dsi, attributes=True)
+        with lock:
+            cur_data, cur_att = gem.data(dsi, attributes=True)
 
         ## store rhot in output file
         if copy_rhot:
-            gemo.write(dsi, cur_data, ds_att = cur_att)
+            with lock:
+                gemo.write(dsi, cur_data, ds_att = cur_att)
 
         if gem.bands[b]['tt_gas'] < setu['min_tgas_rho']: return b
         if gem.bands[b]['rhot_ds'] not in gem.datasets: return b
@@ -1289,19 +1291,20 @@ def acolite_l2r(gem,
 
             ## write ac parameters
             if setu['dsf_write_tiled_parameters']:
-                if len(np.atleast_1d(romix)>1):
-                    if romix.shape == cur_data.shape:
-                        gemo.write('romix_{}'.format(gem.bands[b]['wave_name']), romix)
-                if len(np.atleast_1d(astot)>1):
-                    if astot.shape == cur_data.shape:
-                        gemo.write('astot_{}'.format(gem.bands[b]['wave_name']), astot)
-                if len(np.atleast_1d(dutott)>1):
-                    if dutott.shape == cur_data.shape:
-                        gemo.write('dutott_{}'.format(gem.bands[b]['wave_name']), dutott)
-                if (setu['dsf_residual_glint_correction']) & (setu['dsf_residual_glint_correction_method']=='default'):
-                    if len(np.atleast_1d(ttot_all[b])>1):
-                        if ttot_all[b].shape == cur_data.shape:
-                            gemo.write('ttot_{}'.format(gem.bands[b]['wave_name']), ttot_all[b])
+                with lock:
+                    if len(np.atleast_1d(romix)>1):
+                        if romix.shape == cur_data.shape:
+                            gemo.write('romix_{}'.format(gem.bands[b]['wave_name']), romix)
+                    if len(np.atleast_1d(astot)>1):
+                        if astot.shape == cur_data.shape:
+                            gemo.write('astot_{}'.format(gem.bands[b]['wave_name']), astot)
+                    if len(np.atleast_1d(dutott)>1):
+                        if dutott.shape == cur_data.shape:
+                            gemo.write('dutott_{}'.format(gem.bands[b]['wave_name']), dutott)
+                    if (setu['dsf_residual_glint_correction']) & (setu['dsf_residual_glint_correction_method']=='default'):
+                        if len(np.atleast_1d(ttot_all[b])>1):
+                            if ttot_all[b].shape == cur_data.shape:
+                                gemo.write('ttot_{}'.format(gem.bands[b]['wave_name']), ttot_all[b])
 
             ## do atmospheric correction
             rhot_noatm = (cur_data / gem.bands[b]['tt_gas']) - romix
@@ -1374,7 +1377,8 @@ def acolite_l2r(gem,
                             target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
 
             cur_rhorc = (cur_rhorc - rorayl_cur) / (dutotr_cur)
-            gemo.write(dso.replace('rhos_', 'rhorc_'), cur_rhorc, ds_att = ds_att)
+            with lock:
+                gemo.write(dso.replace('rhos_', 'rhorc_'), cur_rhorc, ds_att = ds_att)
             cur_rhorc = None
             rorayl_cur = None
             dtotr_cur = None
