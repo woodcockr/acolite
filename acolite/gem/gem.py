@@ -9,8 +9,6 @@ import acolite as ac
 import os, sys
 import numpy as np
 from netCDF4 import Dataset
-# WIP PUT A LOCK ON THIS OBJECTS FILE ACCESS
-from threading import Lock
 
 class gem(object):
         def __init__(self, file, new=False,
@@ -28,8 +26,6 @@ class gem(object):
             self.netcdf_compression=netcdf_compression
             self.netcdf_compression_level=netcdf_compression_level
             self.netcdf_compression_least_significant_digit=netcdf_compression_least_significant_digit
-            # WIP Lock to handle access to the gem object which has single threaded file IO
-            self.lock = Lock()
 
             if new:
                 self.new = True
@@ -59,8 +55,7 @@ class gem(object):
                 self.gatts['thermal_bands'] = ['6_vcid_1', '6_vcid_2', '6_VCID_1', '6_VCID_2']
 
         def datasets_read(self):
-            with self.lock:
-                self.datasets = ac.shared.nc_datasets(self.file)
+            self.datasets = ac.shared.nc_datasets(self.file)
 
         def data(self, ds, attributes=False, store=False, return_data=True):
             if ds in self.data_mem:
@@ -71,8 +66,7 @@ class gem(object):
                     catt = {}
             else:
                 if ds in self.datasets:
-                    with self.lock:
-                        cdata, catt = ac.shared.nc_data(self.file, ds, attributes=True)
+                    cdata, catt = ac.shared.nc_data(self.file, ds, attributes=True)
                     cmask = cdata.mask
                     cdata = cdata.data
                     if cdata.dtype in [np.dtype('float32'), np.dtype('float64')]:
@@ -92,8 +86,7 @@ class gem(object):
             if self.new:
                 if os.path.exists(self.file):
                     os.remove(self.file)
-            with self.lock:
-                ac.output.nc_write(self.file, ds, data, attributes=self.gatts,
+            ac.output.nc_write(self.file, ds, data, attributes=self.gatts,
                                 dataset_attributes=ds_att, new=self.new,
                                 nc_projection=self.nc_projection,
                                 netcdf_compression=self.netcdf_compression,
@@ -103,11 +96,10 @@ class gem(object):
             self.new = False
 
         def update_attributes(self):
-            with self.lock:
-                with Dataset(self.file, 'a', format='NETCDF4') as nc:
-                    for key in self.gatts.keys():
-                        if self.gatts[key] is not None:
-                            try:
-                                setattr(nc, key, self.gatts[key])
-                            except:
-                                print('Failed to write attribute: {}'.format(key))
+            with Dataset(self.file, 'a', format='NETCDF4') as nc:
+                for key in self.gatts.keys():
+                    if self.gatts[key] is not None:
+                        try:
+                            setattr(nc, key, self.gatts[key])
+                        except:
+                            print('Failed to write attribute: {}'.format(key))

@@ -9,7 +9,7 @@
 ##                2022-07-15 (QV) added option to select most common model for non-fixed DSF
 ##                2022-09-24 (QV) removed special case for DESIS
 import concurrent.futures
-# from threading import Lock
+from threading import Lock
 
 def acolite_l2r(gem,
                 output = None,
@@ -32,9 +32,7 @@ def acolite_l2r(gem,
     time_start = datetime.datetime.now()
 
     # WIP Lock to handle access to the gem object which has single threaded file IO
-    # lock = Lock()
-    # WIP Remove all references to Lock at some point (most are commented out right now)
-    lock = None
+    lock = Lock()
 
     ## read gem file if NetCDF
     if type(gem) is str:
@@ -495,9 +493,8 @@ def acolite_l2r(gem,
                 if (gem.bands[b]['wave_nm'] > setu['dsf_wave_range'][1]): return b, None, None
 
                 if verbosity > 1: print(b, gem.bands[b]['rhot_ds'])
-                # WIP Lock in gem now
-                # with lock:
-                band_data = gem.data(gem.bands[b]['rhot_ds'])*1.0
+                with lock:
+                    band_data = gem.data(gem.bands[b]['rhot_ds'])*1.0
                 band_shape = band_data.shape
                 valid = np.isfinite(band_data)*(band_data>0)
                 mask = valid == False
@@ -1384,9 +1381,8 @@ def acolite_l2r(gem,
             utotr_cur = None
 
         ## write rhos
-        # WIP Lock in gem now
-        # with lock:
-        gemo.write(dso, cur_data, ds_att = ds_att)
+        with lock:
+            gemo.write(dso, cur_data, ds_att = ds_att)
         cur_data = None
         if verbosity > 1: print('{}/B{} took {:.1f}s ({})'.format(gem.gatts['sensor'], b, time.time()-t0, 'RevLUT' if use_revlut else 'StdLUT'))
         return b
@@ -1552,10 +1548,9 @@ def acolite_l2r(gem,
                     if gc_choice is False:
                         gc_choice = True
                         if gc_user is None:
-                            # WIP Lock in gem now
-                            # with lock:
-                            swir1_rhos = gemo.data(gc_swir1)[sub_gc]
-                            swir2_rhos = gemo.data(gc_swir2)[sub_gc]
+                            with lock:
+                                swir1_rhos = gemo.data(gc_swir1)[sub_gc]
+                                swir2_rhos = gemo.data(gc_swir2)[sub_gc]
                             ## set negatives to 0
                             swir1_rhos[swir1_rhos<0] = 0
                             swir2_rhos[swir2_rhos<0] = 0
@@ -1570,18 +1565,16 @@ def acolite_l2r(gem,
                             swir1_rhos, swir2_rhos = None, None
                             use_swir1 = None
                         else:
-                            # WIP Lock in gem now
-                            # with lock:
-                            rhog_ref = gemo.data(gc_user)[sub_gc]
+                            with lock:
+                                rhog_ref = gemo.data(gc_user)[sub_gc]
                             ## set negatives to 0
                             rhog_ref[rhog_ref<0] = 0
                         ## write reference glint
                         if setu['glint_write_rhog_ref']:
                             tmp = np.zeros(gemo.gatts['data_dimensions'], dtype=np.float32) + np.nan
                             tmp[sub_gc] = rhog_ref
-                            # WIP Lock in gem now
-                            # with lock:
-                            gemo.write('rhog_ref', tmp)
+                            with lock:
+                                gemo.write('rhog_ref', tmp)
                             tmp = None
                     ## end select glint correction band
 
@@ -1596,21 +1589,18 @@ def acolite_l2r(gem,
                         cur_rhog = gc_USER * rhog_ref
 
                     ## remove glint from rhos
-                    # WIP Lock in gem now
-                    # with lock:
-                    cur_data = gemo.data(rhos_ds)
+                    with lock:
+                        cur_data = gemo.data(rhos_ds)
                     cur_data[sub_gc]-=cur_rhog
-                    # WIP Lock in gem now
-                    # with lock:
-                    gemo.write(rhos_ds, cur_data, ds_att = gem.bands[b])
+                    with lock:
+                        gemo.write(rhos_ds, cur_data, ds_att = gem.bands[b])
 
                     ## write band glint
                     if setu['glint_write_rhog_all']:
                         tmp = np.zeros(gemo.gatts['data_dimensions'], dtype=np.float32) + np.nan
                         tmp[sub_gc] = cur_rhog
-                        # WIP Lock in gem now
-                        # with lock:
-                        gemo.write('rhog_{}'.format(gemo.bands[b]['wave_name']), tmp, ds_att={'wavelength':gemo.bands[b]['wavelength']})
+                        with lock:
+                            gemo.write('rhog_{}'.format(gemo.bands[b]['wave_name']), tmp, ds_att={'wavelength':gemo.bands[b]['wavelength']})
                         tmp = None
                     cur_rhog = None
                     return b
