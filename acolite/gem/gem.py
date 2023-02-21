@@ -36,10 +36,11 @@ class gem(object):
                     if os.path.exists(self.file):
                         os.remove(self.file)
 
-                if os.path.exists(self.file):
-                    self.new = False
-                    self.gatts_read()
-                    self.datasets_read()
+            if os.path.exists(self.file):
+                self.new = False
+                self.gatts_read()
+                self.datasets_read()
+                with self.lock:
                     self.nc_projection = ac.shared.nc_read_projection(self.file)
 
         def gatts_read(self):
