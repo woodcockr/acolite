@@ -5,6 +5,7 @@
 ## modifications: 2021-12-08 (QV) added nc_projection
 ##                2022-09-28 (QV) changed gem from dict to object
 import concurrent.futures
+from threading import Lock
 
 def acolite_l2w(gem,
                 settings = {},
@@ -20,6 +21,9 @@ def acolite_l2w(gem,
     import acolite as ac
     import scipy.ndimage
     import skimage.color
+
+    # WIP Lock to handle access to the gem object which has single threaded file IO
+    lock = Lock()
 
     ## read gem file if NetCDF
     if type(gem) is str:
@@ -138,18 +142,19 @@ def acolite_l2w(gem,
     outmask = None
     # WIP BEGIN toa_out_of_limit
     # for ci, cur_par in enumerate(rhot_ds):
-    def toa_out_of_limt(cur_par, rhot_waves_ci, setu):
+    def toa_out_of_limt(cur_par, rhot_waves_ci, setu, lock):
         if rhot_waves_ci<setu['l2w_mask_high_toa_wave_range'][0]: return None
         if rhot_waves_ci>setu['l2w_mask_high_toa_wave_range'][1]: return None
         if verbosity > 3: print('Computing TOA limit mask from {} > {}.'.format(cur_par, setu['l2w_mask_high_toa_threshold']))
-        cur_data = gem.data(cur_par)
+        with lock:
+            cur_data = gem.data(cur_par)
         if setu['l2w_mask_smooth']:
             cur_data = ac.shared.fillnan(cur_data)
             cur_data = scipy.ndimage.gaussian_filter(cur_data, setu['l2w_mask_smooth_sigma'], mode='reflect')
         return cur_data
     futures = []
     with  concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = [executor.submit(toa_out_of_limt, cur_par, rhot_waves[ci], setu) for ci, cur_par in enumerate(rhot_ds) ]
+        futures = [executor.submit(toa_out_of_limt, cur_par, rhot_waves[ci], setu, lock) for ci, cur_par in enumerate(rhot_ds) ]
         for future in concurrent.futures.as_completed(futures):
             try:
                 cur_data = future.result()
@@ -174,17 +179,18 @@ def acolite_l2w(gem,
     neg_mask = None
     # WIP BEING negative_rhos
     # for ci, cur_par in enumerate(rhos_ds):
-    def negative_rhos(cur_par, rhos_waves_ci, setu):
+    def negative_rhos(cur_par, rhos_waves_ci, setu, lock):
         if rhos_waves_ci<setu['l2w_mask_negative_wave_range'][0]: return None
         if rhos_waves_ci>setu['l2w_mask_negative_wave_range'][1]: return None
         if verbosity > 3: print('Computing negative reflectance mask from {}.'.format(cur_par))
-        cur_data = gem.data(cur_par)
+        with lock:
+            cur_data = gem.data(cur_par)
         #if setu['l2w_mask_smooth']: cur_data = scipy.ndimage.gaussian_filter(cur_data, setu['l2w_mask_smooth_sigma'])
         return cur_data
 
     futures = []
-    with  concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = [executor.submit(negative_rhos, cur_par, rhos_waves[ci], setu) for ci, cur_par in enumerate(rhos_ds) ]
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = [executor.submit(negative_rhos, cur_par, rhos_waves[ci], setu, lock) for ci, cur_par in enumerate(rhos_ds) ]
         for future in concurrent.futures.as_completed(futures):
             try:
                 cur_data = future.result()
