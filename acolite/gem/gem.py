@@ -46,49 +46,49 @@ class gem(object):
         def gatts_read(self):
             with self.lock:
                 self.gatts = ac.shared.nc_gatts(self.file)
-            ## detect thermal sensor
-            if self.gatts['sensor'] == 'L8_OLI':
-                self.gatts['thermal_sensor'] = 'L8_TIRS'
-                self.gatts['thermal_bands'] = ['10', '11']
-            elif self.gatts['sensor'] == 'L9_OLI':
-                self.gatts['thermal_sensor'] = 'L9_TIRS'
-                self.gatts['thermal_bands'] = ['10', '11']
-            elif self.gatts['sensor'] == 'L5_TM':
-                self.gatts['thermal_sensor'] = 'L5_TM'
-                self.gatts['thermal_bands'] = ['6']
-            elif self.gatts['sensor'] == 'L7_ETM':
-                self.gatts['thermal_sensor'] = 'L7_ETM'
-                self.gatts['thermal_bands'] = ['6_vcid_1', '6_vcid_2', '6_VCID_1', '6_VCID_2']
+                ## detect thermal sensor
+                if self.gatts['sensor'] == 'L8_OLI':
+                    self.gatts['thermal_sensor'] = 'L8_TIRS'
+                    self.gatts['thermal_bands'] = ['10', '11']
+                elif self.gatts['sensor'] == 'L9_OLI':
+                    self.gatts['thermal_sensor'] = 'L9_TIRS'
+                    self.gatts['thermal_bands'] = ['10', '11']
+                elif self.gatts['sensor'] == 'L5_TM':
+                    self.gatts['thermal_sensor'] = 'L5_TM'
+                    self.gatts['thermal_bands'] = ['6']
+                elif self.gatts['sensor'] == 'L7_ETM':
+                    self.gatts['thermal_sensor'] = 'L7_ETM'
+                    self.gatts['thermal_bands'] = ['6_vcid_1', '6_vcid_2', '6_VCID_1', '6_VCID_2']
 
         def datasets_read(self):
             with self.lock:
                 self.datasets = ac.shared.nc_datasets(self.file)
 
         def data(self, ds, attributes=False, store=False, return_data=True):
-            if ds in self.data_mem:
-                cdata = self.data_mem[ds]
-                if ds in self.data_att:
-                    catt = self.data_att[ds]
+            with self.lock:
+                if ds in self.data_mem:
+                    cdata = self.data_mem[ds]
+                    if ds in self.data_att:
+                        catt = self.data_att[ds]
+                    else:
+                        catt = {}
                 else:
-                    catt = {}
-            else:
-                if ds in self.datasets:
-                    with self.lock:
+                    if ds in self.datasets:
                         cdata, catt = ac.shared.nc_data(self.file, ds, attributes=True)
-                    cmask = cdata.mask
-                    cdata = cdata.data
-                    if cdata.dtype in [np.dtype('float32'), np.dtype('float64')]:
-                        cdata[cmask] = np.nan
-                    if (self.store) or (store):
-                        self.data_mem[ds] = cdata
-                        self.data_att[ds] = catt
-                else:
-                    return()
-            if return_data:
-                if attributes:
-                    return(cdata, catt)
-                else:
-                    return(cdata)
+                        cmask = cdata.mask
+                        cdata = cdata.data
+                        if cdata.dtype in [np.dtype('float32'), np.dtype('float64')]:
+                            cdata[cmask] = np.nan
+                        if (self.store) or (store):
+                            self.data_mem[ds] = cdata
+                            self.data_att[ds] = catt
+                    else:
+                        return()
+                if return_data:
+                    if attributes:
+                        return(cdata, catt)
+                    else:
+                        return(cdata)
 
         def write(self, ds, data, ds_att = {}):
             with self.lock:
