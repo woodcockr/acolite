@@ -30,20 +30,21 @@ class gem(object):
             self.netcdf_compression_least_significant_digit=netcdf_compression_least_significant_digit
             # WIP Lock to handle access to the gem object which has single threaded file IO
             self.lock = Lock()
+            with self.lock:
+                if new:
+                    self.new = True
+                    if os.path.exists(self.file):
+                        os.remove(self.file)
 
-            if new:
-                self.new = True
                 if os.path.exists(self.file):
-                    os.remove(self.file)
-
-            if os.path.exists(self.file):
-                self.new = False
-                self.gatts_read()
-                self.datasets_read()
-                self.nc_projection = ac.shared.nc_read_projection(self.file)
+                    self.new = False
+                    self.gatts_read()
+                    self.datasets_read()
+                    self.nc_projection = ac.shared.nc_read_projection(self.file)
 
         def gatts_read(self):
-            self.gatts = ac.shared.nc_gatts(self.file)
+            with self.lock:
+                self.gatts = ac.shared.nc_gatts(self.file)
             ## detect thermal sensor
             if self.gatts['sensor'] == 'L8_OLI':
                 self.gatts['thermal_sensor'] = 'L8_TIRS'
@@ -89,10 +90,11 @@ class gem(object):
                     return(cdata)
 
         def write(self, ds, data, ds_att = {}):
-            if self.new:
-                if os.path.exists(self.file):
-                    os.remove(self.file)
             with self.lock:
+                if self.new:
+                    if os.path.exists(self.file):
+                        os.remove(self.file)
+
                 ac.output.nc_write(self.file, ds, data, attributes=self.gatts,
                                 dataset_attributes=ds_att, new=self.new,
                                 nc_projection=self.nc_projection,
