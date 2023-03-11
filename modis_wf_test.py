@@ -152,7 +152,10 @@ def download_and_process(stac_item, product_yaml: str, username: str, password: 
             #     source_assets.append(out) # out is file name
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 for out in executor.map(fetch_http_file, files):
-                    source_assets.append(out)
+                    status, value = out
+                    if not status:
+                        raise Exception(f'{value}') # value is error message
+                    source_assets.append(value) # value is file name
                     pass
 
             # Cogify
@@ -173,13 +176,13 @@ def download_and_process(stac_item, product_yaml: str, username: str, password: 
             root = Path(inputs_path)
             for file in root.iterdir():
                 logging.debug(str(file.relative_to(root)))
-                res = s3_upload_file(
-                    str(file),
-                    scratch_bucket,
-                    f'{userid}/{s3_outputs_prefix}/{stac_item["id"]}/{str(file.relative_to(root))}',
-                )
-                if not res:
-                    raise Exception(f'FAILED: {stac_item["id"]}')
+                # res = s3_upload_file(
+                #     str(file),
+                #     scratch_bucket,
+                #     f'{userid}/{s3_outputs_prefix}/{stac_item["id"]}/{str(file.relative_to(root))}',
+                # )
+                # if not res:
+                #     raise Exception(f'FAILED: {stac_item["id"]}')
         except (FileExistsError) as e:
             return f"{e}"
         except Exception as e:
