@@ -30,15 +30,15 @@ from tqdm.auto import tqdm
 package_path='/workspaces/acolite_workflow'
 # package_repo='https://dev.azure.com/csiro-easi/easi-hub-partners/_git/easi-workflows'
 # repo = Path(package_path) / package_repo.split('/')[-1]
-repo = Path(package_path) / 'easi-workflows/tasks'
+repo = Path(package_path) / 'easi-workflows'
 sys.path.insert(1, str(repo))
 
-from utils.earthdatasession import (AuthorizationError, EarthdataSession,
+from tasks.utils.earthdatasession import (AuthorizationError, EarthdataSession,
                                      FileNotFoundError, FileSizeError,
                                      ServiceBusyError, earthdata_download_file)
-from utils.utils import elapsed_time, set_logger
-from modis_l2_easi_prepare import main as modis_l2_easi_prepare
-from modis_l2_to_cog import preprocess
+from tasks.utils.utils import elapsed_time, set_logger
+from tasks.modis_l2_easi_prepare import main as modis_l2_easi_prepare
+from tasks.modis_l2_to_cog import preprocess
 
 
 def fetch_s3_obj(entry):
@@ -204,8 +204,8 @@ current_time = now.strftime("%H_%M_%S")
 bbox = (134.8505,-32.373035,140.2338,-32.2587)
 catalog = pystac_client.Client.open("https://cmr.earthdata.nasa.gov/stac/OB_DAAC")
 
-query = catalog.search(collections=['MODISA_L2_OC.vR2022.0'], datetime="2023-01-01/2023-01-05", max_items=2, limit=10, bbox=bbox) #, query=["platform=LANDSAT_9", "landsat:collection_category=T1"])
-
+# query = catalog.search(collections=['MODISA_L2_OC.vR2022.0'], datetime="2023-01-01/2023-01-05", max_items=2, limit=10, bbox=bbox) #, query=["platform=LANDSAT_9", "landsat:collection_category=T1"])
+query = catalog.search(collections=['MODISA_L2_SST.vR2019.0'], datetime="2023-01-01/2023-01-05", max_items=2, limit=10, bbox=bbox) #, query=["platform=LANDSAT_9", "landsat:collection_category=T1"])
 # # Looking through collections
 # for collection in catalog.get_collections():
 #     print(collection.id)
@@ -228,13 +228,13 @@ userid = ""
 # Set this prefix to place all the data from this run under it in s3
 s3_outputs_prefix = 'tasmania'
 
-product_yaml = Path(package_path+'/easi-workflows/products/obdaac/nasa_aqua_l2_oc.yaml')
+product_yaml = Path(package_path+'/easi-workflows/products/obdaac/nasa_aqua_l2_sst.yaml')
 
 # profiler = cProfile.Profile()
 # profiler.enable()
 
 for item in items_json['features']:
-    result = download_and_process(item, product_yaml, "woodcockr", "edCopgafQ1.", userid, scratch_bucket, s3_outputs_prefix)
+    result = download_and_process(item, product_yaml, "auser", "apassword", userid, scratch_bucket, s3_outputs_prefix)
     print(result)
 
 # profiler.disable()
