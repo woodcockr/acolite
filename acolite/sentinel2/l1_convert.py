@@ -8,6 +8,9 @@
 ##                2021-12-31 (QV) new handling of settings
 ##                2022-11-16 (QV) added dfoo outputs
 
+import concurrent.futures
+from threading import Lock
+
 def l1_convert(inputfile, output = None, settings = {},
                 percentiles_compute = True,
                 percentiles = (0,1,5,10,25,50,75,90,95,99,100),
@@ -724,10 +727,14 @@ def l1_convert(inputfile, output = None, settings = {},
             for Bn in band_data['RADIO_ADD_OFFSET']:
                 band_data['RADIO_ADD_OFFSET'][Bn] = float(band_data['RADIO_ADD_OFFSET'][Bn])
         if verbosity > 1: print('Converting bands')
-        # WIP Multithread candidate...?
-        for bi, b in enumerate(rsr_bands):
+        # WIP BEGIN convert_band
+        # for bi, b in enumerate(rsr_bands):
+        def convert_band(b, safe_files, granule, waves_names, sub, warp_to, nodata, dilate, dilate_iterations, \
+            band_data, quant, waves_mu, gains, gains_dict, offsets, offsets_dict, percentiles_compute, percentiles, \
+            setu, nc_projection, gatts, new,  \
+            verbosity, lock):
             Bn = 'B{}'.format(b)
-            if Bn not in safe_files[granule]: continue
+            if Bn not in safe_files[granule]: return
             if os.path.exists(safe_files[granule][Bn]['path']):
                 if b in waves_names:
                     data = ac.shared.read_band(safe_files[granule][Bn]['path'], sub=sub, warp_to=warp_to)
@@ -756,15 +763,34 @@ def l1_convert(inputfile, output = None, settings = {},
                         ds_att['percentiles_data'] = np.nanpercentile(data, percentiles)
 
                     ## write to ms file
-                    ac.output.nc_write(ofile, ds, data, replace_nan=True, attributes=gatts, new=new,
-                                        dataset_attributes = ds_att, nc_projection=nc_projection,
-                                        netcdf_compression=setu['netcdf_compression'],
-                                        netcdf_compression_level=setu['netcdf_compression_level'],
-                                        netcdf_compression_least_significant_digit=setu['netcdf_compression_least_significant_digit'])
+                    with lock:
+                        ac.output.nc_write(ofile, ds, data, replace_nan=True, attributes=gatts, new=new,
+                                            dataset_attributes = ds_att, nc_projection=nc_projection,
+                                            netcdf_compression=setu['netcdf_compression'],
+                                            netcdf_compression_level=setu['netcdf_compression_level'],
+                                            netcdf_compression_least_significant_digit=setu['netcdf_compression_least_significant_digit'])
                     new = False
                     if verbosity > 1: print('Converting bands: Wrote {} ({})'.format(ds, data.shape))
             else:
-                continue
+                return
+
+        # WIP END convert_band
+        lock = Lock()
+        print('**** NEW L1 CONVERT ****')
+        with  concurrent.futures.ThreadPoolExecutor() as executor:
+            future_to_band = {
+                executor.submit(convert_band, b, safe_files, granule, waves_names, sub, warp_to, nodata, dilate, dilate_iterations, \
+            band_data, quant, waves_mu, gains, gains_dict, offsets, offsets_dict, percentiles_compute, percentiles, \
+            setu, nc_projection, gatts, new,  \
+            verbosity, lock) : b for b in rsr_bands }
+            for future in concurrent.futures.as_completed(future_to_band):
+                band = future_to_band[future]
+                try:
+                    data = future.result()
+                except Exception as exc:
+                    print('%r generated an exception: %s' % (band, exc))
+                else:
+                    print('Band %r completed' % (band))
 
         if verbosity > 1:
             print('Conversion took {:.1f} seconds'.format(time.time()-t0))
