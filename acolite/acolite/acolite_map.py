@@ -12,10 +12,13 @@
 ##                2022-12-29 (QV) fix for RGB raster (data scaled again to 255)
 ##                2022-12-30 (QV) moved rgb stretch to different function, added rgb gamma
 ##                                added scale bar option
+##                2023-09-28 (QV) improved rgb mapping with mpl>3.7
+##                2024-03-14 (QV) update settings handling
 
 def acolite_map(ncf, output = None,
                 settings = None,
                 plot_all = True,
+                plot_datasets = [],
                 plot_skip = ['lon', 'lat', 'l2_flags'],
                 map_save = True,
                 map_show = False ):
@@ -58,11 +61,14 @@ def acolite_map(ncf, output = None,
             if ('{}_*'.format('_'.join(sp[0:-1])) in pscale) & (cparl not in pscale):
                 pard = {k:pscale['{}_*'.format('_'.join(sp[0:-1]))][k] for k in pscale['{}_*'.format('_'.join(sp[0:-1]))]}
                 wave = sp[-1]
+            elif ('{}_*'.format(sp[0]) in pscale) & (cparl not in pscale):
+                pard = {k:pscale['{}_*'.format(sp[0])][k] for k in pscale['{}_*'.format(sp[0])]}
+                wave = sp[-1]
             elif cparl in pscale:
                 pard = {k:pscale[cparl][k] for k in pscale[cparl]}
             else:
                 pard = {'log':False, 'name':cpar, 'unit': ''}
-                pard['cmap'] = 'Planck_Parchment_RGB'
+                pard['cmap'] = setu['map_default_colormap']#'Planck_Parchment_RGB'
             ## do auto ranging
             if setu['map_auto_range'] | ('min' not in pard) | ('max' not in pard):
                 drange = np.nanpercentile(im, setu['map_auto_range_percentiles'])
@@ -130,10 +136,13 @@ def acolite_map(ncf, output = None,
             if crs is None:
                 if setu['map_pcolormesh']:
                     if rgb: ## convert rgb values to color tuple before mapping
-                        mesh_rgb = im[:, :, :]
-                        colorTuple = mesh_rgb.reshape((mesh_rgb.shape[0] * mesh_rgb.shape[1]), 3)
-                        colorTuple = np.insert(colorTuple,3,1.0,axis=1)
-                        axim = plt.pcolormesh(lon, lat, im[:,:,0], color=colorTuple, shading='nearest')
+                        if mpl.__version__ > '3.7.0':
+                            axim = plt.pcolormesh(lon, lat, im, shading='auto')
+                        else:
+                            mesh_rgb = im[:, :, :]
+                            colorTuple = mesh_rgb.reshape((mesh_rgb.shape[0] * mesh_rgb.shape[1]), 3)
+                            colorTuple = np.insert(colorTuple,3,1.0,axis=1)
+                            axim = plt.pcolormesh(lon, lat, im[:,:,0], color=colorTuple, shading='auto')
                     else:
                         axim = plt.pcolormesh(lon, lat, im, norm=norm, cmap=cmap, shading='auto')
                         if scene_mask is not None:
@@ -146,6 +155,11 @@ def acolite_map(ncf, output = None,
                         plt.ylim(limit[0],limit[2])
                     plt.xticks(**font)
                     plt.yticks(**font)
+
+                    ## rotate tick labels
+                    plt.xticks(rotation = setu['map_xtick_rotation'])
+                    plt.yticks(rotation = setu['map_ytick_rotation'])
+
                 else:
                     axim = plt.imshow(im, norm=norm, cmap=cmap)
                     if scene_mask is not None:
@@ -153,12 +167,20 @@ def acolite_map(ncf, output = None,
 
                     plt.axis('off')
             else: ## cartopy
-                axim = ax.imshow(im, origin='upper', extent=img_extent, transform=image_crs)
-                gl = ax.gridlines(draw_labels=True)
-                gl.xlabels_top = False
-                gl.ylabels_left = True
-                gl.xlabels_bottom = True
-                gl.ylabels_right = False
+                axim = ax.imshow(im, origin='upper', extent=img_extent, transform=image_crs, norm=norm, cmap=cmap)
+                gl = ax.gridlines(draw_labels=True, linewidth=1, color=setu['map_gridline_color'], alpha=0.75, linestyle='--')
+                gl.top_labels = False
+                gl.left_labels = True
+                gl.bottom_labels = True
+                gl.right_labels = False
+                ## set size and rotation of ticklabels
+                gl.xlabel_style = {'size': setu['map_fontsize'], 'rotation': setu['map_xtick_rotation']}
+                gl.ylabel_style = {'size': setu['map_fontsize'], 'rotation': setu['map_ytick_rotation']}
+
+                ## format ticks
+                from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
+                gl.xformatter = LONGITUDE_FORMATTER
+                gl.yformatter = LATITUDE_FORMATTER
 
             if setu['map_title']: plt.title(title, **font)
 
@@ -187,11 +209,11 @@ def acolite_map(ncf, output = None,
                         markersize = None
                     ## plot marker
                     pplot = plt.plot(p['px'], p['py'], color=p['color'],
-                                             marker=p['sym'],
+                                             marker=p['sym'], zorder=10,
                                              markersize = markersize, mec=mec, mfc=mfc, mew=mew)
                     ## plot marker label
                     if p['label_plot']:
-                        plt.text(p['pxl'], p['pyl'], p['label'], color='white', fontsize=fontsize,
+                        plt.text(p['pxl'], p['pyl'], p['label'], color='white', fontsize=fontsize, zorder=10,
                                  path_effects = [pe.withStroke(linewidth=2, foreground=p['color'])],
                                  verticalalignment=points[pname]['va'], horizontalalignment=points[pname]['ha'])
             ## end add point markers
@@ -249,14 +271,17 @@ def acolite_map(ncf, output = None,
     imratio = None
 
     ## combine default and user defined settings
-    setu = ac.acolite.settings.parse(gatts['sensor'], settings=settings)
+    setu = ac.acolite.settings.parse(gatts['sensor'], settings=ac.settings['user'])
+    if settings is not None: ## don't overwrite user settings here
+        setu_ = ac.acolite.settings.parse(None, settings=settings, merge=False)
+        for k in setu_: setu[k] = setu_[k]
 
     ## set font settings
     font = {'fontname':setu['map_fontname'], 'fontsize':setu['map_fontsize']}
     mpl.rc('text', usetex=setu['map_usetex'])
 
     scene_mask = None
-    if 'l2_flags' in datasets:
+    if ('l2_flags' in datasets) & (setu['map_mask']):
         scene_mask = ac.shared.nc_data(ncf, 'l2_flags')
         ## convert scene mask to int if it is not (e.g. after reprojection)
         if scene_mask.dtype not in [np.int16, np.int32]: scene_mask = scene_mask.astype(int)
@@ -282,10 +307,11 @@ def acolite_map(ncf, output = None,
         if setu['map_cartopy']:
             try:
                 import cartopy.crs as ccrs
-                proj4_string = gatts['proj4_string']
-                p = pyproj.Proj(proj4_string)
-                img_extent = gatts['xrange'][0],gatts['xrange'][1],gatts['yrange'][0],gatts['yrange'][1]
-                pcrs = pyproj.CRS(gatts['proj4_string'])
+                d, att = ac.shared.nc_data(ncf, gatts['projection_key'], attributes=True)
+                #proj4_string = gatts['proj4_string']
+                crs_proj = pyproj.Proj(att['crs_wkt'])
+                img_extent = gatts['xrange'][0],gatts['xrange'][1],gatts['yrange'][1],gatts['yrange'][0]
+                pcrs = pyproj.CRS(att['crs_wkt'])
                 uzone = pcrs.coordinate_operation.name.split()[-1]
                 zone = int(uzone[0:2])
                 south = uzone[-1].upper() == 'S'
@@ -309,14 +335,22 @@ def acolite_map(ncf, output = None,
     if not os.path.exists(odir):
         os.makedirs(odir)
 
+    isodate = ''
+    if 'isodate' in gatts: isodate = gatts['isodate']
+    elif 'time_coverage_end' in gatts: isodate = gatts['time_coverage_end']
+    elif 'time_coverage_start' in gatts: isodate = gatts['time_coverage_start']
+
     if 'satellite_sensor' in gatts:
-        title_base = '{} {}'.format(gatts['satellite_sensor'].replace('_', '/'), gatts['isodate'].replace('T', ' ')[0:19])
+        title_base = '{} {}'.format(gatts['satellite_sensor'].replace('_', '/'), isodate.replace('T', ' ')[0:19])
     else:
-        title_base = '{} {}'.format(gatts['sensor'].replace('_', '/'), gatts['isodate'].replace('T', ' ')[0:19])
+        title_base = '{} {}'.format(gatts['sensor'].replace('_', '/'), isodate.replace('T', ' ')[0:19])
 
     ## parameters to plot
     plot_parameters = []
-    if plot_all: plot_parameters = [k for k in datasets if k not in plot_skip]
+    if plot_all:
+        plot_parameters = [k for k in datasets if k not in plot_skip]
+    else:
+        plot_parameters = [k for k in datasets if k in plot_datasets]
     if setu['rgb_rhot']: plot_parameters+=['rgb_rhot']
     if setu['rgb_rhos']: plot_parameters+=['rgb_rhos']
     if setu['rgb_rhorc']: plot_parameters+=['rgb_rhorc']
@@ -366,8 +400,10 @@ def acolite_map(ncf, output = None,
                 if plon < np.nanmin(lon): continue
                 if plat > np.nanmax(lat): continue
                 if plat < np.nanmin(lat): continue
-                if setu['map_pcolormesh']:
+                if setu['map_pcolormesh'] & setu['map_projected']:
                     px, py = plon, plat
+                elif setu['map_cartopy'] & setu['map_projected']:
+                    px, py = crs_proj(plon, plat)
                 else:
                     tmp = ((lon - plon)**2 + (lat - plat)**2)**0.5
                     i, j = np.where(tmp == np.nanmin(tmp))
@@ -479,32 +515,41 @@ def acolite_map(ncf, output = None,
                     ds_base = 'rhot_'
                 else:
                     ds_base = '_'.join(ds_base[0]) + '_'
+                    if setu['add_band_name']: ds_base = 'rhot_'
+
             if cpar == 'rgb_rhos':
                 ds_base = [ds.split('_')[0:-1] for ds in datasets if 'rhos_' in ds]
                 if len(ds_base) == 0:
                     ds_base = 'rhos_'
                 else:
                     ds_base = '_'.join(ds_base[0]) + '_'
+                    if setu['add_band_name']: ds_base = 'rhos_'
+
             if cpar == 'rgb_rhorc':
                 ds_base = [ds.split('_')[0:-1] for ds in datasets if 'rhorc_' in ds]
                 if len(ds_base) == 0:
                     ds_base = 'rhorc_'
                 else:
                     ds_base = '_'.join(ds_base[0]) + '_'
+                    if setu['add_band_name']: ds_base = 'rhorc_'
+
             if cpar == 'rgb_rhow':
                 ds_base = [ds.split('_')[0:-1] for ds in datasets if 'rhow_' in ds]
                 if len(ds_base) == 0:
                     ds_base = 'rhow_'
                 else:
                     ds_base = '_'.join(ds_base[0]) + '_'
+                    if setu['add_band_name']: ds_base = 'rhow_'
 
-            rho_ds = [ds for ds in datasets if ds_base in ds]
+            rho_ds = [ds for ds in datasets if ds_base in ds[0:len(ds_base)]]
             rho_wv = [int(ds.split('_')[-1]) for ds in rho_ds]
             if len(rho_wv) < 3: continue
             ## read and stack rgb
             for iw, w in enumerate(rgb_wave):
                 wi, ww = ac.shared.closest_idx(rho_wv, w)
-                data = ac.shared.nc_data(ncf, '{}{}'.format(ds_base,ww))
+                #ds_name = '{}{}'.format(ds_base,ww)
+                ds_name = [ds for ds in datasets if (ds_base in ds) & ('{:.0f}'.format(ww) in ds)][0]
+                data = ac.shared.nc_data(ncf, ds_name)
 
                 ## autoscale rgb to percentiles
                 if setu['rgb_autoscale']:
@@ -532,7 +577,10 @@ def acolite_map(ncf, output = None,
             ## read data
             tmp = ac.shared.nc_data(ncf, ds)
             im = tmp.data
-            im[tmp.mask] = np.nan
+            if type(im) in [np.float32, np.float64]:
+                im[tmp.mask] = np.nan
+            else:
+                im[tmp.mask] = 0
             tmp = None
 
         ## plot figure

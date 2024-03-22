@@ -4,10 +4,17 @@
 ## 2021-03-10
 ## modifications: 2021-12-08 (QV) added nc_projection
 ##                2021-12-31 (QV) new handling of settings
+##                2024-03-14 (QV) update settings handling
 
-def acolite_l1r(bundle, setu, input_type=None):
+def acolite_l1r(bundle, settings = None, input_type=None):
     import acolite as ac
     import os, sys, shutil
+
+    ## parse run settings
+    if settings is not None:
+        ac.settings['user'] = ac.acolite.settings.parse(None, settings=settings, merge=False)
+        for k in ac.settings['user']: ac.settings['run'][k] = ac.settings['user'][k]
+    setu = {k: ac.settings['run'][k] for k in ac.settings['run']}
 
     ## set up l1r_files list
     l1r_files = []
@@ -78,6 +85,13 @@ def acolite_l1r(bundle, setu, input_type=None):
     if input_type == 'Sentinel-3':
         l1r_files, setu = ac.sentinel3.l1_convert(bundle, settings = setu)
     ## end Sentinel-3
+    ################
+
+    ################
+    ## VIIRS
+    if input_type == 'VIIRS':
+        l1r_files, setu = ac.viirs.l1_convert(bundle, settings = setu)
+    ## end VIIRS
     ################
 
     ################
@@ -193,6 +207,41 @@ def acolite_l1r(bundle, setu, input_type=None):
     ## end ENMAP
     ################
 
+    ################
+    ## EMIT
+    if input_type == 'EMIT':
+        l1r_files, setu = ac.emit.l1_convert(bundle, settings = setu)
+    ## end EMIT
+    ################
+
+    ################
+    ## DIMAP
+    if input_type == 'DIMAP':
+        l1r_files, setu = ac.dimap.l1_convert(bundle, settings = setu)
+    ## end DIMAP
+    ################
+
+    ################
+    ## S2Resampling
+    if input_type == 'S2Resampling':
+        l1r_files, setu = ac.s2resampling.l1_convert(bundle, settings = setu)
+    ## end S2Resampling
+    ################
+
+    ################
+    ## Haiyang
+    if input_type == 'HAIYANG':
+        l1r_files, setu = ac.haiyang.l1_convert(bundle, settings = setu)
+    ## end Haiyang
+    ################
+
+    ################
+    ## HYPSO
+    if input_type == 'HYPSO':
+        l1r_files, setu = ac.hypso.l1_convert(bundle, settings = setu)
+    ## end HYPSO
+    ################
+
     ## remove extracted files
     for i, im in enumerate(identification):
         try:
@@ -206,6 +255,6 @@ def acolite_l1r(bundle, setu, input_type=None):
         except KeyError:
             print('Not deleting extracted file as "delete_extracted_input" is not in settings.')
         except BaseException as err:
-            print(f"Error removing extracted files {err=}, {type(err)=}")
+            print("Error removing extracted files {}, {}".format(err, type(err)))
 
     return(l1r_files, setu, bundle)

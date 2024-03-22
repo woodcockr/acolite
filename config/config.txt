@@ -6,12 +6,16 @@
 defaults=$ACDIR/config/defaults.txt
 parameter_labels=$ACDIR/config/parameter_labels.txt
 parameter_cf_attributes=$ACDIR/config/parameter_cf_attributes.json
+parameter_discretisation=$ACDIR/config/parameter_discretisation.txt
 
 ## Data directory
 data_dir=$ACDIR/data
 
 ## Scratch directory
 scratch_dir=$ACDIR/scratch
+
+## External directory
+external_dir=$ACDIR/external
 
 ## atmospheric correction LUT data directory
 lut_dir=$ACDIR/data/LUT
@@ -38,19 +42,53 @@ tact_dir=$ACDIR/data/TACT
 grid_dir=$ACDIR/data/TACT/grid
 
 ## libRadtran directory
-libradtran_dir=$ACDIR/external/libRadtran-2.0.2
+libradtran_dir=$ACDIR/external/libRadtran-2.0.5
 
 ##
 ## other configuration
 ##
+
+## TACT THREDDS data URLs
+tact_thredds_url_era5=https://thredds.rda.ucar.edu/thredds/dodsC/files/g/ds633.0/e5.oper.an.pl
+tact_thredds_url_gdas1=https://thredds.rda.ucar.edu/thredds/dodsC/files/g/ds083.3
+tact_thredds_url_merra2=https://goldsmr5.gesdisc.eosdis.nasa.gov/opendap/MERRA2/M2I3NPASM.5.12.4
+tact_thredds_url_ncep=https://psl.noaa.gov/thredds/dodsC/Datasets
+
+## URL to retrieve LUT files
+## main URL
+lut_url=https://raw.githubusercontent.com/acolite/acolite_luts/main
+## URL for China
+#lut_url=https://raw.gitmirror.com/acolite/acolite_luts/main
 
 ## EarthData credentials (will be set to environment variables by acolite)
 ## alternatively use .netrc for machine earthdata
 EARTHDATA_u=
 EARTHDATA_p=
 
+## EarthExplorer API
+EARTHEXPLORER_api=https://m2m.cr.usgs.gov/api/api/json/stable
+EARTHEXPLORER_download=https://earthexplorer.usgs.gov/download
+EARTHEXPLORER_ers=https://ers.cr.usgs.gov
+
+## EarthExplorer credentials
+## alternatively use .netrc vor machine earthexplorer
+EARTHEXPLORER_u=
+EARTHEXPLORER_p=
+
+## CDSE urls
+CDSE_odata=https://catalogue.dataspace.copernicus.eu/odata/v1
+CDSE_auth=https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token
+
+## CDSE credentials
+## alternatively use .netrc for machine cdse
+CDSE_u=
+CDSE_p=
+
+## attributes not to write in output files
+skip_attributes=EARTHDATA_u,EARTHDATA_p,EARTHEXPLORER_u,EARTHEXPLORER_p,CDSE_u,CDSE_p
+
 ## list of hyperspectral sensors (do not edit)
-hyper_sensors=CHRIS,PRISMA,ISS_HICO,EO1_HYPERION,DESIS_HSI,ENMAP_HSI
+hyper_sensors=CHRIS,PRISMA,ISS_HICO,EO1_HYPERION,DESIS_HSI,ENMAP_HSI,ISS_EMIT,HYPSO1
 
 ## list of thermal sensors (do not edit)
-thermal_sensors=L5_TM,L7_ETM,L8_TIRS,L9_TIRS,ISS_ECOSTRESS,TERRA_ASTER_TIR
+thermal_sensors=L5_TM,L7_ETM,L8_TIRS,L9_TIRS,ISS_ECOSTRESS,TERRA_ASTER_TIR,JPSS-1_VIIRS_TIR,JPSS-2_VIIRS_TIR,SUOMI-NPP_VIIRS_TIR
