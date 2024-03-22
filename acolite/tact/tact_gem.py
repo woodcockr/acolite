@@ -7,6 +7,7 @@
 ##                2022-07-31 (QV) skip loading of datasets that are not required
 ##                2022-08-02 (QV) added source keyword
 ##                2022-08-03 (QV) added external emissivity files
+##                2024-03-14 (QV) update settings handling
 
 def tact_gem(gem, output_file = True,
              return_data = False,
@@ -21,7 +22,7 @@ def tact_gem(gem, output_file = True,
              #output_intermediate = False,
              copy_datasets = ['lon', 'lat'],
              #source = 'era5',
-             settings = {}, verbosity=0):
+             settings = None, verbosity=0):
 
     import os, datetime, json
     import numpy as np
@@ -46,8 +47,16 @@ def tact_gem(gem, output_file = True,
         gem = ac.gem.read(gem, sub=sub, skip_datasets=skip_datasets)
     gemf = gem['gatts']['gemfile']
 
-    ## settings from settings dict
-    setu = ac.acolite.settings.parse(gem['gatts']['sensor'], settings=settings)
+    ## combine default and user defined settings
+    if settings is not None:
+        ac.settings['user'] = ac.acolite.settings.parse(None, settings=settings, merge=False)
+        for k in ac.settings['user']: ac.settings['run'][k] = ac.settings['user'][k]
+    setu = ac.acolite.settings.parse(gem['gatts']['sensor'], settings=ac.settings['user'])
+    for k in setu: ac.settings['run'][k] = setu[k] ## update run settings with user settings and sensor defaults
+
+    ## get verbosity from run settings
+    verbosity = ac.settings['run']['verbosity']
+
     output = setu['output']
     emissivity = setu['tact_emissivity']
     emissivity_file = setu['tact_emissivity_file']
@@ -55,11 +64,12 @@ def tact_gem(gem, output_file = True,
     output_atmosphere = setu['tact_output_atmosphere']
     output_intermediate = setu['tact_output_intermediate']
     reptran = setu['tact_reptran']
+    wave_range = setu['tact_range']
 
     ## detect sensor
     if ('thermal_sensor' not in gem['gatts']) or ('thermal_bands' not in gem['gatts']):
         if verbosity > 0: print('TACT Processing of {} not supported'.format(gem['gatts']['sensor']))
-        return()
+        return
 
     ## check if we need to run tact
     run_tact = False
@@ -68,7 +78,7 @@ def tact_gem(gem, output_file = True,
         if dsi in gem['datasets']: run_tact = True
     if not run_tact:
         print('No thermal bands for {} (bands {}) in {}'.format(gem['gatts']['sensor'], ','.join(gem['gatts']['thermal_bands']), gemf))
-        return()
+        return
 
     ## check blackfill
     if setu['blackfill_skip']:
@@ -82,14 +92,14 @@ def tact_gem(gem, output_file = True,
         band_data = None
         if (nbf/npx) >= float(setu['blackfill_max']):
             if verbosity>0: print('Skipping scene as crop is {:.0f}% blackfill'.format(100*nbf/npx))
-            return()
+            return
 
     if source == 'era5':
-        max_date = (datetime.datetime.now() - datetime.timedelta(days=90)).isoformat()
+        max_date = (datetime.datetime.now() - datetime.timedelta(days=92)).isoformat()
         if gem['gatts']['isodate'] > max_date:
             print('File too recent for TACT with {} profiles: after {}'.format(source, max_date))
             print('Run with tact_profile_source=gdas1 or tact_profile_source=ncep.reanalysis2 for NRT processing')
-            return()
+            return
 
     ## load emissivity data
     if emissivity_file is not None:
@@ -104,7 +114,7 @@ def tact_gem(gem, output_file = True,
     if emissivity_file is not None:
         em = json.load(open(emissivity_file, 'r'))
         print('Loaded emissivity file {}'.format(emissivity_file))
-        print(em)
+        #print(em)
     else:
         em = None
 
@@ -141,6 +151,7 @@ def tact_gem(gem, output_file = True,
                                                 lon=gem['data']['lon'],
                                                 lat=gem['data']['lat'],
                                                 satsen=gem['gatts']['thermal_sensor'],
+                                                wave_range = wave_range,
                                                 reptran = reptran, source = source)
     for ds in thd:
         gem['data'][ds] = thd[ds]
@@ -228,8 +239,16 @@ def tact_gem(gem, output_file = True,
                 gem['data'][emk] = np.tile(gem['data'][emk], gem['data']['lat'].shape)
 
             ## K constants
-            k1 = float(gem['gatts']['K1_CONSTANT_BAND_{}'.format(b.upper())])
-            k2 = float(gem['gatts']['K2_CONSTANT_BAND_{}'.format(b.upper())])
+            k1n = 'K1_CONSTANT_BAND_{}'.format(b.upper())
+            k2n = 'K2_CONSTANT_BAND_{}'.format(b.upper())
+            if k1n in gem['gatts']:
+                k1 = float(gem['gatts'][k1n])
+            else:
+                k1 = gem['atts'][btk][k1n]
+            if k2n in gem['gatts']:
+                k2 = float(gem['gatts'][k2n])
+            else:
+                k2 = gem['atts'][btk][k2n]
 
             if ltk not in gem['data']:
                 ## compute lt from bt
@@ -246,6 +265,15 @@ def tact_gem(gem, output_file = True,
             gem['data'][dso] = (k2/np.log((k1/gem['data'][lsk])+1))
             if to_celcius: gem['data'][dso] += -273.15
 
+            gem['atts'][dso] = {}
+            gem['atts'][dso]['units'] = 'K'
+            if btk in gem['atts']:
+                if 'wavelength' in gem['atts'][btk]:
+                    gem['atts'][dso]['wavelength'] = gem['atts'][btk]['wavelength']
+            #if btk in gem['atts']:
+            #    gem['atts'][dso] = {k:gem['atts'][btk][k] for k in gem['atts'][btk]}
+            gem['atts'][dso][k1n] = k1
+            gem['atts'][dso][k2n] = k2
 
     ## write output NetCDF
     if output_file:

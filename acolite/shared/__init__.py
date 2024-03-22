@@ -1,3 +1,5 @@
+from .auth import auth
+
 from .f0_get import *
 
 from .rsr_read import *
@@ -18,6 +20,7 @@ from .geolocation_sub import *
 
 from .nc_read import *
 from .nc_write import *
+from .nc_projection_dct import *
 from .nc_read_projection import *
 from .nc_extract_point import *
 
@@ -30,6 +33,7 @@ from .datascl import *
 from .closest_idx import *
 from .isodate_to_yday import *
 from .download_file import *
+from .hdr import *
 
 from .region_box import *
 from .region_find import *
@@ -51,8 +55,13 @@ from .warp_and_merge import *
 from .warp_from_source import *
 from .warp_inputfile import *
 from .polygon_crop import *
+from .polygon_from_wkt import *
 from .polygon_limit import *
 from .reproject2 import *
+from .roi_wkt import *
+
+from .polygon_wkt import *
+from .limit_wkt import *
 
 from .similarity_read import *
 from .gauss_response import *
@@ -60,6 +69,10 @@ from .sun_position import *
 from .rsr_hyper import *
 
 from .polylakes import *
+from .land_water_mask import *
 
 from .rgb_stretch import *
 from .scale_dist import *
+from .calc_tdifs import *
+from .read_6sv_coef import *
+from .read_6sv_ph import *

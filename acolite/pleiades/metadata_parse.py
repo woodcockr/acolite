@@ -13,6 +13,7 @@
 ##                2020-10-18 (QV) added tile info
 ##                2020-10-18 (QV) renamed from parse_metadata, prep for acg
 ##                2022-11-09 (QV) added PNEO
+##                2023-12-13 (QV) change relative azimuth by 180
 
 def metadata_parse(metafile, pan=False):
     import os, sys, fnmatch, dateutil.parser
@@ -202,7 +203,9 @@ def metadata_parse(metafile, pan=False):
     ## set some defaults
     metadata['sza'] = 90. - metadata['GEOMETRY'][1]['SUN_ELEVATION']
     metadata['vza'] = metadata['GEOMETRY'][1]['VIEWING_ANGLE']
-    metadata['raa'] = abs(metadata['GEOMETRY'][1]['SUN_AZIMUTH'] - metadata['GEOMETRY'][1]['VIEWING_AZIMUTH'])
-    while metadata['raa'] > 180: metadata['raa'] = abs(metadata['raa']-360)
-
+    metadata['saa'] = metadata['GEOMETRY'][1]['SUN_AZIMUTH']
+    metadata['vaa'] = metadata['GEOMETRY'][1]['VIEWING_AZIMUTH']
+    metadata['raa'] = abs(metadata['saa'] - metadata['vaa'])
+    while metadata['raa'] > 180: metadata['raa'] = abs(360-metadata['raa'])
+    metadata['raa'] = 180 - metadata['raa']
     return(metadata)

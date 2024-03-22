@@ -1,6 +1,7 @@
 from .acolite_l1r import *
 from .acolite_l2r import *
 from .acolite_l2w import *
+from .acolite_flags import *
 
 from .acolite_pans import *
 
@@ -13,6 +14,7 @@ from .acolite_luts import *
 from .identify_bundle import *
 from .inputfile_test import *
 from .parameter_scaling import *
+from .parameter_discretisation import *
 
 from . import settings
 from . import logging
