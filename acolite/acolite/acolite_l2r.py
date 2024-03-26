@@ -242,7 +242,7 @@ def acolite_l2r(gem,
     # WIP Loop replaced with concurrent futures
     # Original code: geom_mean = {k: np.nanmean(gem.data(k)) if k in gem.datasets else gem.gatts[k] for k in geom_ds}
     geom_mean={}
-    with  concurrent.futures.ThreadPoolExecutor() as executor:
+    with  concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
         future_to_k = {}
         for k in geom_ds:
             if k in gem.datasets:
@@ -484,15 +484,16 @@ def acolite_l2r(gem,
                     continue
                 if verbosity > 1: print('Writing {}'.format(ds))
                 cdata, catts = gem.data(ds, attributes=True)
-                # WIP if this is made multithreaded there needs to be a lock here...
-                gemo.write(ds, cdata, ds_att=catts)
+                with lock:
+                    gemo.write(ds, cdata, ds_att=catts)
                 del cdata, catts
 
         ## write dem
         if setu['dem_pressure_write']:
             for k in ['dem', 'dem_pressure']:
                 if k in gem.data_mem:
-                    gemo.write(k, gem.data_mem[k])
+                    with lock:
+                        gemo.write(k, gem.data_mem[k])
                     gem.data_mem[k] = None
 
     t0 = time.time()
@@ -767,7 +768,7 @@ def acolite_l2r(gem,
                 # aot_dict[b] = aot_band
                 # aot_bands.append(b)
 
-            with  concurrent.futures.ThreadPoolExecutor() as executor:
+            with  concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
                 future_to_band = {
                     executor.submit(aot_band, b, gem, tiles, segment_data, dsf_rhod, luts, use_revlut, revl, setu, hyper, lutdw,
                         verbosity, lock) : b for b in gem.bands }
@@ -1157,8 +1158,9 @@ def acolite_l2r(gem,
 
         ## output data
         if setu['exp_output_intermediate']:
-            if not exp_fixed_epsilon:   gemo.write('epsilon', epsilon)
-            if not exp_fixed_rhoam: gemo.write('rhoam', rhoam)
+            with lock:
+                if not exp_fixed_epsilon:   gemo.write('epsilon', epsilon)
+                if not exp_fixed_rhoam: gemo.write('rhoam', rhoam)
     ## end exponential
 
     ## set up interpolator for tiled processing
@@ -1195,7 +1197,8 @@ def acolite_l2r(gem,
         else:
             aot_out = aot_sel * 1.0
         ## write aot
-        gemo.write('aot_550', aot_out)
+        with lock:
+            gemo.write('aot_550', aot_out)
         aot_out = None
 
     ## store ttot for glint correction
@@ -1258,7 +1261,8 @@ def acolite_l2r(gem,
             if len(rho_cirrus.shape) == 3:
                 rho_cirrus = np.nanmean(rho_cirrus, axis=2)
             ## write cirrus mean
-            gemo.write('rho_cirrus', rho_cirrus)
+            with lock:
+                gemo.write('rho_cirrus', rho_cirrus)
     print('use_revlut', use_revlut)
 
     hyper_res = None
@@ -1392,12 +1396,13 @@ def acolite_l2r(gem,
             ## interpolate tiled processing to full scene
             if setu['dsf_aot_estimate'] == 'tiled':
                 if verbosity > 1: print('Interpolating tiles')
-                romix = ac.shared.tiles_interp(romix, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
-                target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
-                astot = ac.shared.tiles_interp(astot, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
-                target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
-                dutott = ac.shared.tiles_interp(dutott, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
-                target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
+                with lock: # ! Hacky: This section uses a LOT of memory so use the lock to only have one process go through this section at a time.
+                    romix = ac.shared.tiles_interp(romix, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
+                    target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
+                    astot = ac.shared.tiles_interp(astot, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
+                    target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
+                    dutott = ac.shared.tiles_interp(dutott, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
+                    target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
 
             ## create full scene parameters for segmented processing
             if setu['dsf_aot_estimate'] == 'segmented':
@@ -1504,12 +1509,14 @@ def acolite_l2r(gem,
             if setu['dsf_write_tiled_parameters']:
                 if len(np.atleast_1d(rorayl_cur)>1):
                     if rorayl_cur.shape == cur_data.shape:
-                        gemo.write('rorayl_{}'.format(gem.bands[b]['wave_name']), rorayl_cur)
+                        with lock:
+                            gemo.write('rorayl_{}'.format(gem.bands[b]['wave_name']), rorayl_cur)
                     else:
                         ds_att['rorayl'] = rorayl_cur[0]
                 if len(np.atleast_1d(dutotr_cur)>1):
                     if dutotr_cur.shape == cur_data.shape:
-                        gemo.write('dutotr_{}'.format(gem.bands[b]['wave_name']), dutotr_cur)
+                        with lock:
+                            gemo.write('dutotr_{}'.format(gem.bands[b]['wave_name']), dutotr_cur)
                     else:
                         ds_att['dutotr'] = dutotr_cur[0]
 
@@ -1525,7 +1532,7 @@ def acolite_l2r(gem,
         if verbosity > 1: print('{}/B{} took {:.1f}s ({})'.format(gem.gatts['sensor'], b, time.time()-t0, 'RevLUT' if use_revlut else 'StdLUT'))
         return b
 
-    with  concurrent.futures.ThreadPoolExecutor() as executor:
+    with  concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
         future_to_band = {
             executor.submit(compute_surface_reflectance, b, gem, gemo, setu, gk, copy_rhot, rho_cirrus, ac_opt, aot_sel, use_revlut, ttot_all, luts, aot_lut, hyper, par, lutdw, rsrd, xnew, ynew, segment_data, exp_lut, long_wv, short_wv, epsilon, rhoam, exp_fixed_epsilon, exp_fixed_rhoam, mask, verbosity, lock) : b for b in gem.bands }
         for future in concurrent.futures.as_completed(future_to_band):
@@ -1538,7 +1545,8 @@ def acolite_l2r(gem,
 
     # WIP END compute surface reflectances
     ## update outputfile dataset info
-    gemo.datasets_read()
+    with lock:
+        gemo.datasets_read()
 
     ## glint correction
     if (ac_opt == 'dsf') & (setu['dsf_residual_glint_correction']) & (setu['dsf_residual_glint_correction_method']=='default'):
@@ -1621,7 +1629,8 @@ def acolite_l2r(gem,
 
             ## compute where to apply the glint correction
             ## sub_gc has the idx for non masked data with rhos_ref below the masking threshold
-            gc_mask_data = gemo.data(gc_mask)
+            with lock:
+                gc_mask_data = gemo.data(gc_mask)
 
             if gc_mask_data is None: ## reference rhos dataset can be missing for night time images (tgas computation goes negative)
                 print('No glint mask could be determined.')
@@ -1639,8 +1648,9 @@ def acolite_l2r(gem,
                     ## two way direct transmittance
                     if setu['dsf_aot_estimate'] == 'tiled':
                         if setu['slicing']:
-                            ## load rhos dataset
-                            cur_data = gemo.data(rhos_ds)
+                            ## load rhos
+                            with lock:
+                                cur_data = gemo.data(rhos_ds)
                             valid_mask = np.isfinite(cur_data)
                             del cur_data
                         ttot_all_b = ac.shared.tiles_interp(ttot_all[b], xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
@@ -1678,12 +1688,14 @@ def acolite_l2r(gem,
                     if b not in ttot_all: return b
                     print('Performing glint correction for band {} ({} nm)'.format(b, gemo.bands[b]['wave_name']))
                     ## load rhos dataset
-                    cur_data = gemo.data(rhos_ds)
+                    with lock:
+                        cur_data = gemo.data(rhos_ds)
 
                     ## two way direct transmittance
                     if setu['dsf_aot_estimate'] == 'tiled':
                         if setu['slicing']: valid_mask = np.isfinite(cur_data)
-                        ttot_all_b = ac.shared.tiles_interp(ttot_all[b], xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
+                        with lock: # ! Memory usage higher than before?
+                            ttot_all_b = ac.shared.tiles_interp(ttot_all[b], xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
                         target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
                     elif setu['dsf_aot_estimate'] == 'segmented':
                         ttot_all_ = ttot_all[b] * 1.0
@@ -1696,7 +1708,8 @@ def acolite_l2r(gem,
                     if setu['dsf_write_tiled_parameters']:
                          if len(np.atleast_1d(ttot_all_b)>1):
                              if ttot_all_b.shape == muv.shape:
-                                 gemo.write('ttot_{}'.format(gem.bands[b]['wave_name']), ttot_all_b)
+                                 with lock:
+                                    gemo.write('ttot_{}'.format(gem.bands[b]['wave_name']), ttot_all_b)
                              else:
                                  gemo.bands[b]['ttot_all'] = ttot_all_b[0]
                     ## end compute ttot_all_band
@@ -1756,7 +1769,7 @@ def acolite_l2r(gem,
                             tmp[sub_gc] = rhog_ref
                             with lock:
                                 gemo.write('rhog_ref', tmp)
-                            tmp = None
+                            del tmp
                     ## end select glint correction band
 
                     ## calculate glint in this band
@@ -1772,8 +1785,6 @@ def acolite_l2r(gem,
                         del gc_USER
 
                     ## remove glint from rhos
-                    with lock:
-                        cur_data = gemo.data(rhos_ds)
                     cur_data[sub_gc]-=cur_rhog
                     with lock:
                         gemo.write(rhos_ds, cur_data, ds_att = gem.bands[b])
@@ -1786,10 +1797,10 @@ def acolite_l2r(gem,
                         with lock:
                             gemo.write('rhog_{}'.format(gemo.bands[b]['wave_name']), tmp, ds_att={'wavelength':gemo.bands[b]['wavelength']})
                         del tmp
-                    del cur_rhog
+                    del cur_rhog, rhog_ref, use_swir1
                     return b
                 # WIP END glint Correction function
-                with  concurrent.futures.ThreadPoolExecutor() as executor:
+                with  concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
                     future_to_band = {
                         executor.submit(glint_correction, b, gem, setu, gemo, ttot_all, mus, sub_gc, omega, refri_sen, gc_user, gc_swir1_b, gc_swir2_b, T_SWIR1, T_SWIR2, Rf_sen, T_USER, gc_user_b, gc_swir1, gc_swir2, gc_choice, lock) : b for b in gem.bands }
                     for future in concurrent.futures.as_completed(future_to_band):
@@ -1800,11 +1811,11 @@ def acolite_l2r(gem,
                         else:
                             print('glint_correction: Band %r completed' % (b))
 
-                del sub_gc, rhog_ref
+                del sub_gc
                 if gc_user is not None:
                     del T_USER
                 else:
-                    del T_SWIR1, T_SWIR2, use_swir1
+                    del T_SWIR1, T_SWIR2
             del Rf_sen, omega, muv, mus
         if (setu['dsf_aot_estimate'] == 'tiled') & (setu['slicing']):
             del valid_mask
@@ -1866,16 +1877,17 @@ def acolite_l2r(gem,
             if setu['dsf_aot_estimate'] == 'fixed':
                 gc_sur_cur = surf_res[b]
             if setu['dsf_aot_estimate'] == 'segmented':
-                gc_sur_cur = gemo.data(rhos_ds) * np.nan
+                with lock:
+                    gc_sur_cur = gemo.data(rhos_ds) * np.nan
                 for segment in segment_data:
                     gc_sur_cur[segment_data[segment]['sub']] = surf_res[segment][b]
-
-            if gc_ref is None:
-                gc_ref = gemo.data(rhos_ds)
-                gc_sur = gc_sur_cur
-            else:
-                gc_ref = np.dstack((gc_ref, gemo.data(rhos_ds)))
-                gc_sur = np.dstack((gc_sur, gc_sur_cur))
+            with lock:
+                if gc_ref is None:
+                    gc_ref = gemo.data(rhos_ds)
+                    gc_sur = gc_sur_cur
+                else:
+                    gc_ref = np.dstack((gc_ref, gemo.data(rhos_ds)))
+                    gc_sur = np.dstack((gc_sur, gc_sur_cur))
 
         if gc_ref is None:
             print('No bands found between {} and {} nm for glint correction'.format(setu['dsf_residual_glint_wave_range'][0],
@@ -1888,8 +1900,9 @@ def acolite_l2r(gem,
                 gc_ref_std = np.nanstd(gc_ref, axis=2)
                 gc_ref = None
 
-                gemo.write('glint_mean', gc_ref_mean)
-                gemo.write('glint_std', gc_ref_std)
+                with lock:
+                    gemo.write('glint_mean', gc_ref_mean)
+                    gemo.write('glint_std', gc_ref_std)
             else: ## or use single band
                 gc_ref[gc_ref<0] = 0.0
                 gc_ref_mean = gc_ref*1.0
@@ -1925,15 +1938,18 @@ def acolite_l2r(gem,
                     cur_rhog = gc_ref_mean[gc_sub] * (sur/gc_sur_mean[gc_sub])
 
                 ## remove glint from rhos
-                cur_data = gemo.data(rhos_ds)
+                with lock:
+                    cur_data = gemo.data(rhos_ds)
                 cur_data[gc_sub]-=cur_rhog
-                gemo.write(rhos_ds, cur_data, ds_att = gem.bands[b])
+                with lock:
+                    gemo.write(rhos_ds, cur_data, ds_att = gem.bands[b])
 
                 ## write band glint
                 if setu['glint_write_rhog_all']:
                     tmp = np.zeros(gemo.gatts['data_dimensions'], dtype=np.float32) + np.nan
                     tmp[gc_sub] = cur_rhog
-                    gemo.write('rhog_{}'.format(gemo.bands[b]['wave_name']), tmp, ds_att={'wavelength':gemo.bands[b]['wavelength']})
+                    with lock:
+                        gemo.write('rhog_{}'.format(gemo.bands[b]['wave_name']), tmp, ds_att={'wavelength':gemo.bands[b]['wavelength']})
                     tmp = None
                 cur_rhog = None
     ## end alternative glint correction
