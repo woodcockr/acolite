@@ -14,7 +14,11 @@
 ##                2023-12-07 (QV) option to use S2 AUX
 ##                2024-03-14 (QV) update settings handling
 import concurrent.futures
-from threading import Lock
+from threading import Lock, Semaphore
+
+# When running with multiprocessing some tile_interp calls can blow out memory usage from across all the threads.
+# Use a semaphore to limit it to 2 at a time.
+tiles_interp_sem = Semaphore(value=2)
 
 def acolite_l2r(gem,
                 output = None,
@@ -242,7 +246,7 @@ def acolite_l2r(gem,
     # WIP Loop replaced with concurrent futures
     # Original code: geom_mean = {k: np.nanmean(gem.data(k)) if k in gem.datasets else gem.gatts[k] for k in geom_ds}
     geom_mean={}
-    with  concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+    with  concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         future_to_k = {}
         for k in geom_ds:
             if k in gem.datasets:
@@ -768,7 +772,7 @@ def acolite_l2r(gem,
                 # aot_dict[b] = aot_band
                 # aot_bands.append(b)
 
-            with  concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+            with  concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
                 future_to_band = {
                     executor.submit(aot_band, b, gem, tiles, segment_data, dsf_rhod, luts, use_revlut, revl, setu, hyper, lutdw,
                         verbosity, lock) : b for b in gem.bands }
@@ -1396,7 +1400,7 @@ def acolite_l2r(gem,
             ## interpolate tiled processing to full scene
             if setu['dsf_aot_estimate'] == 'tiled':
                 if verbosity > 1: print('Interpolating tiles')
-                with lock: # ! Hacky: This section uses a LOT of memory so use the lock to only have one process go through this section at a time.
+                with tiles_interp_sem:
                     romix = ac.shared.tiles_interp(romix, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
                     target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
                     astot = ac.shared.tiles_interp(astot, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
@@ -1532,7 +1536,7 @@ def acolite_l2r(gem,
         if verbosity > 1: print('{}/B{} took {:.1f}s ({})'.format(gem.gatts['sensor'], b, time.time()-t0, 'RevLUT' if use_revlut else 'StdLUT'))
         return b
 
-    with  concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+    with  concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         future_to_band = {
             executor.submit(compute_surface_reflectance, b, gem, gemo, setu, gk, copy_rhot, rho_cirrus, ac_opt, aot_sel, use_revlut, ttot_all, luts, aot_lut, hyper, par, lutdw, rsrd, xnew, ynew, segment_data, exp_lut, long_wv, short_wv, epsilon, rhoam, exp_fixed_epsilon, exp_fixed_rhoam, mask, verbosity, lock) : b for b in gem.bands }
         for future in concurrent.futures.as_completed(future_to_band):
@@ -1694,7 +1698,7 @@ def acolite_l2r(gem,
                     ## two way direct transmittance
                     if setu['dsf_aot_estimate'] == 'tiled':
                         if setu['slicing']: valid_mask = np.isfinite(cur_data)
-                        with lock: # ! Memory usage higher than before?
+                        with tiles_interp_sem:
                             ttot_all_b = ac.shared.tiles_interp(ttot_all[b], xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
                         target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
                     elif setu['dsf_aot_estimate'] == 'segmented':
@@ -1800,7 +1804,7 @@ def acolite_l2r(gem,
                     del cur_rhog, rhog_ref, use_swir1
                     return b
                 # WIP END glint Correction function
-                with  concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+                with  concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
                     future_to_band = {
                         executor.submit(glint_correction, b, gem, setu, gemo, ttot_all, mus, sub_gc, omega, refri_sen, gc_user, gc_swir1_b, gc_swir2_b, T_SWIR1, T_SWIR2, Rf_sen, T_USER, gc_user_b, gc_swir1, gc_swir2, gc_choice, lock) : b for b in gem.bands }
                     for future in concurrent.futures.as_completed(future_to_band):
