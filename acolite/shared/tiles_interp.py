@@ -14,7 +14,7 @@ def tiles_interp(data, xnew, ynew, smooth = False, kern_size=2, method='nearest'
     from scipy.interpolate import griddata
     from scipy.ndimage import uniform_filter,percentile_filter, distance_transform_edt
     import acolite as ac
-    
+
     if mask is not None: data[mask] = np.nan
 
     ## fill nans with closest value
