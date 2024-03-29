@@ -6,10 +6,16 @@
 ## modifications:
 ##
 
+import concurrent.futures
+from threading import Lock
+
 def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, return_flags_dataset=True):
     import acolite as ac
     import numpy as np
     import scipy.ndimage
+
+    # WIP Lock to handle access to the gem object which has single threaded file IO
+    lock = Lock()
 
     ## read gem file if NetCDF
     if type(gem) is str:
@@ -91,20 +97,41 @@ def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, ret
     if ac.settings['run']['verbosity'] > 3: print('Computing TOA limit mask.')
     toa_mask = None
     outmask = None
-    for ci, cur_par in enumerate(rhot_ds):
-        if rhot_waves[ci]<ac.settings['run']['l2w_mask_high_toa_wave_range'][0]: continue
-        if rhot_waves[ci]>ac.settings['run']['l2w_mask_high_toa_wave_range'][1]: continue
+    # for ci, cur_par in enumerate(rhot_ds):
+    def compute_toa_limit(ci, cur_par, rhot_waves, ac, gem, lock):
+        if rhot_waves[ci]<ac.settings['run']['l2w_mask_high_toa_wave_range'][0]: return ci,None, None
+        if rhot_waves[ci]>ac.settings['run']['l2w_mask_high_toa_wave_range'][1]: return ci,None, None
         if ac.settings['run']['verbosity'] > 3: print('Computing TOA limit mask from {} > {}.'.format(cur_par, ac.settings['run']['l2w_mask_high_toa_threshold']))
         cwave = rhot_waves[ci]
         cur_par = [ds for ds in rhot_ds if ('{:.0f}'.format(cwave) in ds)][0]
-        cur_data = gem.data(cur_par)
-        if outmask is None: outmask = np.zeros(cur_data.shape).astype(bool)
-        outmask = (outmask) | (np.isnan(cur_data))
+        with lock:
+            cur_data = gem.data(cur_par)
+        outmask = np.isnan(cur_data)
         if ac.settings['run']['l2w_mask_smooth']:
             cur_data = ac.shared.fillnan(cur_data)
             cur_data = scipy.ndimage.gaussian_filter(cur_data, ac.settings['run']['l2w_mask_smooth_sigma'], mode='reflect')
-        if toa_mask is None: toa_mask = np.zeros(cur_data.shape).astype(bool)
-        toa_mask = (toa_mask) | (cur_data > ac.settings['run']['l2w_mask_high_toa_threshold'])
+        toa_mask = np.zeros(cur_data.shape).astype(bool)
+        toa_mask = (cur_data > ac.settings['run']['l2w_mask_high_toa_threshold'])
+
+        return ci, toa_mask, outmask
+
+    with  concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        future_to_cur_par = {
+            executor.submit(compute_toa_limit, cur_par[0], cur_par[1], rhot_waves, ac, gem, lock) : cur_par for cur_par in enumerate(rhot_ds)
+        }
+        for future in concurrent.futures.as_completed(future_to_cur_par):
+            try:
+                ci, toa_mask_partial, outmask_partial = future.result()
+                if toa_mask_partial is not None:
+                    if toa_mask is None: toa_mask = np.zeros(toa_mask_partial.shape).astype(bool)
+                    toa_mask = (toa_mask) | toa_mask_partial
+                if outmask_partial is not None:
+                    if outmask is None: outmask = np.zeros(outmask_partial.shape).astype(bool)
+                    outmask = (outmask) | outmask_partial
+                print('compute_toa_limit: Band %r completed' % (ci))
+            except Exception as exc:
+                print('compute_toa_limit: generated an exception: %s' % (exc))
+
     flags = (flags) | (toa_mask.astype(np.int32)*(2**ac.settings['run']['flag_exponent_toa']))
     toa_mask = None
     flags = (flags) | (outmask.astype(np.int32)*(2**ac.settings['run']['flag_exponent_outofscene']))

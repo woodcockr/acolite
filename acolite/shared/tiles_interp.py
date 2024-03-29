@@ -29,10 +29,11 @@ def tiles_interp(data, xnew, ynew, smooth = False, kern_size=2, method='nearest'
     if smooth:
         z = uniform_filter(cur_data, size=kern_size)
         zv=list(z.ravel())
+        del z
     else:
         zv=list(cur_data.ravel())
     dim = data.shape
-
+    del cur_data
     ### tile centers
     #x = arange(0.5, dim[1], 1)
     #y = arange(0.5, dim[0], 1)

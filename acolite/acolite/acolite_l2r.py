@@ -564,7 +564,7 @@ def acolite_l2r(gem,
             # WIP: BEGIN This appears to be the time consuming section of the code and needs to be replaces by concurrent futures
             def aot_band(b, gem, tiles, segment_data, dsf_rhod, luts, use_revlut, revl, setu, hyper, lutdw,
                         verbosity, lock):
-                if (b in setu['dsf_exclude_bands']): return b, None
+                if (b in setu['dsf_exclude_bands']): return b, None, None
                 if ('rhot_ds' not in gem.bands[b]) or ('tt_gas' not in gem.bands[b]): return b, None, None
                 if gem.bands[b]['rhot_ds'] not in gem.datasets: return b, None, None
 
@@ -656,6 +656,7 @@ def acolite_l2r(gem,
                 else:
                     print('DSF option {} not configured'.format(setu['dsf_aot_estimate']))
                     return b, None, None
+                del band_sub
 
                 ## do gas correction
                 band_sub = np.where(np.isfinite(band_data))
@@ -783,6 +784,7 @@ def acolite_l2r(gem,
                         if aot_band is not None:
                             aot_dict[b] = aot_band
                             aot_bands.append(b)
+                            del aot_band
                     except Exception as exc:
                         print('aot_band: %r generated an exception: %s' % (aot_band, exc))
                     else:
