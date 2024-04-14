@@ -17,8 +17,8 @@ import concurrent.futures
 from threading import Lock, Semaphore
 
 # When running with multiprocessing some tile_interp calls can blow out memory usage from across all the threads.
-# Use a semaphore to limit it to 2 at a time.
-tiles_interp_sem = Semaphore(value=2)
+# Use a semaphore to limit it.
+tiles_interp_sem = Semaphore(value=8)
 
 def acolite_l2r(gem,
                 output = None,
