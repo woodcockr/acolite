@@ -5,21 +5,31 @@
 ## modifications: 2022-02-17 (QV) fix for paths with spaces
 ##                2022-12-29 (QV) use output directory if given
 ##                2022-12-30 (QV) use gdal_merge import to avoid gdal_merge.py not being recognised
+##                2024-02-27 (QV) added COG options
+##                2024-03-14 (QV) update settings handling
+##                                removed some keywords
 
-def nc_to_geotiff_rgb(f, settings = {}, use_gdal_merge_import = True, \
-                      remove_temp_files = True, oformat = 'GTiff'):
+def nc_to_geotiff_rgb(f, settings = None, use_gdal_merge_import = True, remove_temp_files = True):
 
     import os, sys, subprocess
     import acolite as ac
     import numpy as np
     from osgeo import gdal
+    gdal.DontUseExceptions()
     if gdal.__version__ < '3.3':
         from osgeo.utils import gdal_merge
     else:
         from osgeo_utils import gdal_merge
 
+    ## combine default and user defined settings
+    setu = ac.acolite.settings.parse(None, settings = settings)
+    for k in ac.settings['user']: setu[k] = ac.settings['user'][k]
+
     creationOptions = None
-    setu =  ac.acolite.settings.parse(None, settings=settings)
+    oformat = 'GTiff'
+    if setu['export_cloud_optimized_geotiff']:
+        oformat = 'COG'
+        creationOptions = setu['export_cloud_optimized_geotiff_options']
 
     ## get attributes and datasets
     gatts = ac.shared.nc_gatts(f)
@@ -77,16 +87,30 @@ def nc_to_geotiff_rgb(f, settings = {}, use_gdal_merge_import = True, \
                 scale_cur = np.nanpercentile(data, setu['rgb_autoscale_percentiles'])
                 data = None
 
-            ## Byte scaling options
-            options = gdal.TranslateOptions(options='-ot Byte -scale {:.2f} {:.2f} {} {}'.format(scale_cur[0], scale_cur[1],
-                                                                                                 scale_out[0], scale_out[1]))
+            ## Translate options
+            ## output format
+            options_list = ['-of {}'.format(oformat)]
+            options_list += [' -a_nodata 0']
+            if creationOptions is not None:
+                for co in creationOptions: options_list += ['-co {}'.format(co)]
+            options_string = ' '.join(options_list)
+
+            ## Byte scaling
+            byte_scaling_string = ' -ot Byte -scale {:.2f} {:.2f} {} {}'.format(scale_cur[0], scale_cur[1], scale_out[0], scale_out[1])
+            if oformat == 'COG':
+                options_scaling_string = options_string[1] + byte_scaling_string
+            else:
+                options_scaling_string = options_string + byte_scaling_string
+
+            ## TranslateOptions
+            options_creation = gdal.TranslateOptions(options=options_list[0])
+            options_scaling = gdal.TranslateOptions(options=options_scaling_string)
+
             ## warp
             if os.path.exists(ifile): ## use existing tif file
-                dt = gdal.Translate(outfile, ifile, format=oformat,
-                                    creationOptions=creationOptions, options=options)
+                dt = gdal.Translate(outfile, ifile, options=options_scaling)
             else:
-                dt = gdal.Translate(outfile, 'NETCDF:"{}":{}'.format(f, ds), format=oformat,
-                                creationOptions=creationOptions, options=options)
+                dt = gdal.Translate(outfile, 'NETCDF:"{}":{}'.format(f, ds), options=options_scaling)
 
             ## do custom RGB stretch
             if True:
@@ -96,19 +120,27 @@ def nc_to_geotiff_rgb(f, settings = {}, use_gdal_merge_import = True, \
                 tmp = ac.shared.rgb_stretch(data, gamma = gamma, bsc = bsc, stretch=setu['rgb_stretch'])
                 tmp = (tmp*255).astype(np.uint8)
                 dt.GetRasterBand(1).WriteArray(tmp)
+                dt = None
 
-            ## set no data value
-            dt.GetRasterBand(1).SetNoDataValue(0)
+                ## move to another temporary file to resave as COG
+                # temp file does not need to be COG, just convert the RGB to COG
+                #if oformat == 'COG':
+                #    outfile_temp = '{}_{}{}'.format(out, ds, '_temp2.tif')
+                #    os.rename(outfile, outfile_temp)
+                #    dt = gdal.Translate(outfile, outfile_temp, options=options_creation)
+                #    dt = None
+                #    if remove_temp_files: os.remove(outfile_temp)
+
             tempfiles.append("{}".format(outfile))
-            dt = None
 
         ## composite to RGB
         outfile = '{}_{}{}'.format(out, '{}_RGB'.format(base), '.tif')
-        if os.path.exists(outfile):
-            os.remove(outfile)
+        outfile_temp = '{}_{}{}'.format(out, '{}_RGB_temp'.format(base), '.tif')
+        if os.path.exists(outfile): os.remove(outfile)
+        if os.path.exists(outfile_temp): os.remove(outfile_temp)
 
         ## use gdal_merge to merge RGB bands
-        if use_gdal_merge_import:
+        if setu['use_gdal_merge_import']:
             ## run using imported gdal_merge
             ## gives file name errors when running batch processing
             ## so generate default out.tif and rename
@@ -116,15 +148,28 @@ def nc_to_geotiff_rgb(f, settings = {}, use_gdal_merge_import = True, \
             odir = os.path.dirname(outfile)
             os.chdir(odir)
             gdal_merge.main(['', '-quiet', '-separate'] + tempfiles) ## calling without -o will generate out.tif in cwd
-            if os.path.exists('out.tif'): os.rename('out.tif', os.path.basename(outfile))
+            if os.path.exists('out.tif'):
+                if oformat == 'COG': ## COG needs to be converted again
+                    os.rename('out.tif', os.path.basename(outfile_temp))
+                else:
+                    os.rename('out.tif', os.path.basename(outfile))
             os.chdir(cwd)
             ## end imported gdal_merge
         else:
             ## use os to run gdal_merge.py
             tempfiles = ["'{}'".format(tf) for tf in tempfiles] ## add quotes to allow spaces in file path
-            cmd = ['gdal_merge.py',  "-o '{}'".format(outfile), '-separate'] + tempfiles
+            if oformat == 'COG': ## COG needs to be converted again
+                cmd = ['gdal_merge.py', "-o '{}'".format(outfile_temp), '-separate'] + tempfiles
+            else:
+                cmd = ['gdal_merge.py', "-o '{}'".format(outfile), '-separate'] + tempfiles
             ret = os.popen(' '.join(cmd)).read()
             ##sp = subprocess.run(' '.join(cmd),shell=True, check=True, stdout=subprocess.PIPE)
+
+        ## convert the RGB to COG
+        if os.path.exists(outfile_temp) and oformat == 'COG':
+            dt = gdal.Translate(outfile, outfile_temp, options = options_creation)
+            if remove_temp_files: os.remove(outfile_temp.strip("'"))
+        ## end RGB COG
 
         if os.path.exists(outfile): print('Wrote {}'.format(outfile))
 

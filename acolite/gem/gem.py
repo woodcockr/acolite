@@ -4,6 +4,8 @@
 ## modifications: 2021-04-01 (QV) added some write support
 ##                2021-12-08 (QV) added nc_projection
 ##                2022-02-15 (QV) added L9/TIRS
+##                2023-07-12 (QV) removed netcdf_compression settings
+##                2024-01-31 (QV) added skip_attributes
 
 import acolite as ac
 import os, sys
@@ -11,10 +13,7 @@ import numpy as np
 from netCDF4 import Dataset
 
 class gem(object):
-        def __init__(self, file, new=False,
-                    netcdf_compression=False,
-                    netcdf_compression_level=4,
-                    netcdf_compression_least_significant_digit=None):
+        def __init__(self, file, new=False):
             self.file=file
             self.data_mem = {}
             self.data_att = {}
@@ -22,10 +21,6 @@ class gem(object):
             self.bands = {}
             self.verbosity = 0
             self.nc_projection = None
-
-            self.netcdf_compression=netcdf_compression
-            self.netcdf_compression_level=netcdf_compression_level
-            self.netcdf_compression_least_significant_digit=netcdf_compression_least_significant_digit
 
             if new:
                 self.new = True
@@ -75,7 +70,7 @@ class gem(object):
                         self.data_mem[ds] = cdata
                         self.data_att[ds] = catt
                 else:
-                    return()
+                    return
             if return_data:
                 if attributes:
                     return(cdata, catt)
@@ -88,16 +83,14 @@ class gem(object):
                     os.remove(self.file)
             ac.output.nc_write(self.file, ds, data, attributes=self.gatts,
                                 dataset_attributes=ds_att, new=self.new,
-                                nc_projection=self.nc_projection,
-                                netcdf_compression=self.netcdf_compression,
-                                netcdf_compression_level=self.netcdf_compression_level,
-                                netcdf_compression_least_significant_digit=self.netcdf_compression_least_significant_digit)
+                                nc_projection=self.nc_projection)
             if self.verbosity > 0: print('Wrote {}'.format(ds))
             self.new = False
 
         def update_attributes(self):
             with Dataset(self.file, 'a', format='NETCDF4') as nc:
                 for key in self.gatts.keys():
+                    if key in ac.config['skip_attributes']: continue
                     if self.gatts[key] is not None:
                         try:
                             setattr(nc, key, self.gatts[key])

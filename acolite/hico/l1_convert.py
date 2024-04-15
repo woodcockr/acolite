@@ -4,6 +4,8 @@
 ## 2021-08-03
 ## modifications: 2021-12-31 (QV) new handling of settings
 ##                2022-01-04 (QV) added netcdf compression
+##                2023-01-31 (QV) moved F0 import
+##                2023-07-12 (QV) removed netcdf_compression settings from nc_write call
 
 def l1_convert(inputfile, output = None, settings = {}, verbosity=5):
     import numpy as np
@@ -21,9 +23,6 @@ def l1_convert(inputfile, output = None, settings = {}, verbosity=5):
             inputfile = list(inputfile)
     nscenes = len(inputfile)
     if verbosity > 1: print('Starting conversion of {} scenes'.format(nscenes))
-
-    ## get F0 for radiance -> reflectance computation
-    f0 = ac.shared.f0_get(f0_dataset=setu['solar_irradiance_reference'])
 
     ofiles = []
     for file in inputfile:
@@ -59,6 +58,9 @@ def l1_convert(inputfile, output = None, settings = {}, verbosity=5):
         ofile = '{}/{}.nc'.format(odir, obase)
         gatts['obase'] = obase
 
+        ## get F0 for radiance -> reflectance computation
+        f0 = ac.shared.f0_get(f0_dataset=setu['solar_irradiance_reference'])
+
         ## read geometry data
         new = True
         ave = {}
@@ -66,9 +68,7 @@ def l1_convert(inputfile, output = None, settings = {}, verbosity=5):
             print('Reading HICO {}'.format(ds))
             data, att = ac.hico.read(file, ds)
             ave[ds] = np.nanmean(data)
-            ac.output.nc_write(ofile, ds, data, new=new, attributes=gatts,
-                                netcdf_compression=setu['netcdf_compression'],
-                                netcdf_compression_level=setu['netcdf_compression_level'])
+            ac.output.nc_write(ofile, ds, data, new=new, attributes=gatts)
             new = False
 
         if 'sza' not in gatts: gatts['sza'] = ave['sza']
@@ -118,16 +118,10 @@ def l1_convert(inputfile, output = None, settings = {}, verbosity=5):
 
             if output_lt:
                 ## write toa radiance
-                ac.output.nc_write(ofile, 'Lt_{}'.format(bands[b]['wave_name']), cdata_radiance, dataset_attributes = ds_att,
-                            netcdf_compression=setu['netcdf_compression'],
-                            netcdf_compression_level=setu['netcdf_compression_level'],
-                            netcdf_compression_least_significant_digit=setu['netcdf_compression_least_significant_digit'])
+                ac.output.nc_write(ofile, 'Lt_{}'.format(bands[b]['wave_name']), cdata_radiance, dataset_attributes = ds_att)
 
             ## write toa reflectance
-            ac.output.nc_write(ofile, 'rhot_{}'.format(bands[b]['wave_name']), cdata, dataset_attributes = ds_att,
-                            netcdf_compression=setu['netcdf_compression'],
-                            netcdf_compression_level=setu['netcdf_compression_level'],
-                            netcdf_compression_least_significant_digit=setu['netcdf_compression_least_significant_digit'])
+            ac.output.nc_write(ofile, 'rhot_{}'.format(bands[b]['wave_name']), cdata, dataset_attributes = ds_att)
 
         ## update gatts
         with Dataset(ofile, 'a') as nc:

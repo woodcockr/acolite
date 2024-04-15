@@ -6,6 +6,7 @@ from acolite import pleiades
 from acolite import worldview
 from acolite import venus
 from acolite import ikonos
+from acolite import viirs
 
 from acolite import chris
 from acolite import prisma
@@ -13,12 +14,17 @@ from acolite import hico
 from acolite import hyperion
 from acolite import desis
 from acolite import enmap
+from acolite import emit
+from acolite import hypso
 
 from acolite import gf
 from acolite import amazonia
 from acolite import formosat
 from acolite import ecostress
+from acolite import haiyang
 from acolite import sdgsat
+from acolite import dimap
+from acolite import s2resampling
 
 from acolite import ac
 from acolite import aerlut
@@ -26,6 +32,7 @@ from acolite import output
 from acolite import shared
 from acolite import dem
 from acolite import ged
+from acolite import masking
 
 from acolite import tact
 from acolite import acolite
@@ -33,6 +40,9 @@ from acolite import adjacency
 
 from acolite import gem
 from acolite import parameters
+
+from acolite import cdse
+from acolite import earthexplorer
 
 ## ignore numpy errors
 import numpy as np
@@ -49,12 +59,15 @@ path = os.path.dirname(code_path)
 
 ## find config file
 if not os.path.exists('{}{}config'.format(path, os.path.sep)):
+    range_level = 0
     ## check if binary distribution
-    if '{}dist{}acolite'.format(os.path.sep,os.path.sep) in path:
-        ## two levels for this file
-        for i in range(2): path = os.path.split(path)[0]
+    if os.path.join('dist','acolite','_internal') in path:
+        range_level = 3 ## three levels for this file
+    elif os.path.join('dist','acolite') in path:
+        range_level = 2 ## two levels for this file
+    for i in range(range_level): path = os.path.split(path)[0]
 
-cfile='{}{}config{}config.txt'.format(path,os.path.sep,os.path.sep)
+cfile = os.path.join(path, 'config','config.txt')
 config = shared.import_config(cfile)
 config['code_path'] = code_path
 config['path'] = path
@@ -67,7 +80,7 @@ else:
 
     gitdir = '{}/.git'.format(path)
     gd = {}
-    if os.path.exists(gitdir):
+    if os.path.isdir(gitdir):
         gitfiles = os.listdir(gitdir)
 
         for f in ['ORIG_HEAD', 'FETCH_HEAD', 'HEAD']:
@@ -113,7 +126,13 @@ for t in config:
 if 'verbosity' not in config: config['verbosity'] = 5
 
 ## read parameter scaling and settings
-param = {'scaling':acolite.parameter_scaling()}
+param = {'scaling':acolite.parameter_scaling(), 'discretisation': acolite.parameter_discretisation()}
 import json
 with open(config['parameter_cf_attributes'], 'r', encoding='utf-8') as f:
     param['attributes'] = json.load(f)
+
+settings = {}
+## read default processing settings
+settings['defaults'] =  acolite.settings.parse(None, settings=acolite.settings.load(None), merge=False)
+## copy defaults to run, run will be updated with user settings and sensor defaults
+settings['run'] = {k:settings['defaults'][k] for k in settings['defaults']}
