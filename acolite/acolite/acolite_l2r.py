@@ -18,7 +18,7 @@ from threading import Lock, Semaphore
 
 # When running with multiprocessing some tile_interp calls can blow out memory usage from across all the threads.
 # Use a semaphore to limit it.
-tiles_interp_sem = Semaphore(value=8)
+tiles_interp_sem = Semaphore(value=16)
 
 def acolite_l2r(gem,
                 output = None,
@@ -246,7 +246,7 @@ def acolite_l2r(gem,
     # WIP Loop replaced with concurrent futures
     # Original code: geom_mean = {k: np.nanmean(gem.data(k)) if k in gem.datasets else gem.gatts[k] for k in geom_ds}
     geom_mean={}
-    with  concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+    with  concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
         future_to_k = {}
         for k in geom_ds:
             if k in gem.datasets:
@@ -773,7 +773,7 @@ def acolite_l2r(gem,
                 # aot_dict[b] = aot_band
                 # aot_bands.append(b)
 
-            with  concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            with  concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
                 future_to_band = {
                     executor.submit(aot_band, b, gem, tiles, segment_data, dsf_rhod, luts, use_revlut, revl, setu, hyper, lutdw,
                         verbosity, lock) : b for b in gem.bands }
@@ -1538,7 +1538,7 @@ def acolite_l2r(gem,
         if verbosity > 1: print('{}/B{} took {:.1f}s ({})'.format(gem.gatts['sensor'], b, time.time()-t0, 'RevLUT' if use_revlut else 'StdLUT'))
         return b
 
-    with  concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+    with  concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
         future_to_band = {
             executor.submit(compute_surface_reflectance, b, gem, gemo, setu, gk, copy_rhot, rho_cirrus, ac_opt, aot_sel, use_revlut, ttot_all, luts, aot_lut, hyper, par, lutdw, rsrd, xnew, ynew, segment_data, exp_lut, long_wv, short_wv, epsilon, rhoam, exp_fixed_epsilon, exp_fixed_rhoam, mask, verbosity, lock) : b for b in gem.bands }
         for future in concurrent.futures.as_completed(future_to_band):
@@ -1806,7 +1806,7 @@ def acolite_l2r(gem,
                     del cur_rhog, rhog_ref, use_swir1
                     return b
                 # WIP END glint Correction function
-                with  concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+                with  concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
                     future_to_band = {
                         executor.submit(glint_correction, b, gem, setu, gemo, ttot_all, mus, sub_gc, omega, refri_sen, gc_user, gc_swir1_b, gc_swir2_b, T_SWIR1, T_SWIR2, Rf_sen, T_USER, gc_user_b, gc_swir1, gc_swir2, gc_choice, lock) : b for b in gem.bands }
                     for future in concurrent.futures.as_completed(future_to_band):

@@ -115,7 +115,7 @@ def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, ret
 
         return ci, toa_mask, outmask
 
-    with  concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+    with  concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
         future_to_cur_par = {
             executor.submit(compute_toa_limit, cur_par[0], cur_par[1], rhot_waves, ac, gem, lock) : cur_par for cur_par in enumerate(rhot_ds)
         }
