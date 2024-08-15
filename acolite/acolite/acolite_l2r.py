@@ -259,7 +259,7 @@ def acolite_l2r(gem,
             try:
                 geom_mean[k] = future.result()
             except Exception as exc:
-                print(f'{k} generated exception as {exc}')
+                raise Exception(f'{k} generated exception as {exc}')
     # End replace code
 
     if (geom_mean['sza'] > setu['sza_limit']):
@@ -534,6 +534,7 @@ def acolite_l2r(gem,
     aot_lut = None
     xnew = None
     ynew = None
+    xi = None
 
 
     if (ac_opt == 'dsf'):
@@ -792,7 +793,7 @@ def acolite_l2r(gem,
                             aot_bands.append(b)
                             del aot_band
                     except Exception as exc:
-                        print('aot_band: %r generated an exception: %s' % (aot_band, exc))
+                        raise Exception('aot_band: %r generated an exception: %s' % (aot_band, exc))
                     else:
                         print('aot_band: Band %r completed' % (b))
 
@@ -1281,7 +1282,7 @@ def acolite_l2r(gem,
     ## compute surface reflectances
     # WIP BEGIN compute surface reflectances
     # for bi, b in enumerate(gem.bands):
-    def compute_surface_reflectance(b, gem, gemo, setu, gk, copy_rhot, rho_cirrus, ac_opt, aot_sel, use_revlut, ttot_all, luts, aot_lut, hyper, par, lutdw, rsrd, xnew, ynew, segment_data, exp_lut, long_wv, short_wv, epsilon, rhoam, exp_fixed_epsilon, exp_fixed_rhoam, mask, verbosity, lock):
+    def compute_surface_reflectance(b, gem, gemo, setu, gk, copy_rhot, rho_cirrus, ac_opt, aot_sel, use_revlut, ttot_all, luts, aot_lut, hyper, par, lutdw, rsrd, xnew, ynew, segment_data, exp_lut, long_wv, short_wv, epsilon, rhoam, exp_fixed_epsilon, exp_fixed_rhoam, xi, mask, verbosity, lock):
         if ('rhot_ds' not in gem.bands[b]) or ('tt_gas' not in gem.bands[b]):
             if verbosity > 2: print('Band {} at {} nm not in bands dataset'.format(b, gem.bands[b]['wave_name']))
             return b
@@ -1546,12 +1547,12 @@ def acolite_l2r(gem,
 
     with  concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
         future_to_band = {
-            executor.submit(compute_surface_reflectance, b, gem, gemo, setu, gk, copy_rhot, rho_cirrus, ac_opt, aot_sel, use_revlut, ttot_all, luts, aot_lut, hyper, par, lutdw, rsrd, xnew, ynew, segment_data, exp_lut, long_wv, short_wv, epsilon, rhoam, exp_fixed_epsilon, exp_fixed_rhoam, mask, verbosity, lock) : b for b in gem.bands }
+            executor.submit(compute_surface_reflectance, b, gem, gemo, setu, gk, copy_rhot, rho_cirrus, ac_opt, aot_sel, use_revlut, ttot_all, luts, aot_lut, hyper, par, lutdw, rsrd, xnew, ynew, segment_data, exp_lut, long_wv, short_wv, epsilon, rhoam, exp_fixed_epsilon, exp_fixed_rhoam, xi, mask, verbosity, lock) : b for b in gem.bands }
         for future in concurrent.futures.as_completed(future_to_band):
             try:
                 b = future.result()
             except Exception as exc:
-                print('compute_surface_reflectance: %r generated an exception: %s' % (b, exc))
+                raise Exception('compute_surface_reflectance: %r generated an exception: %s' % (b, exc))
             else:
                 print('compute_surface_reflectance: Band %r completed' % (b))
 
@@ -1819,7 +1820,7 @@ def acolite_l2r(gem,
                         try:
                             b = future.result()
                         except Exception as exc:
-                            print('glint_correction: %r generated an exception: %s' % (b, exc))
+                            raise Exception('glint_correction: %r generated an exception: %s' % (b, exc))
                         else:
                             print('glint_correction: Band %r completed' % (b))
 
