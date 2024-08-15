@@ -529,6 +529,12 @@ def acolite_l2r(gem,
     T_USER = None
     T_SWIR1 = None
     T_SWIR2 = None
+    gk = None
+    aot_sel = None
+    aot_lut = None
+    xnew = None
+    ynew = None
+
 
     if (ac_opt == 'dsf'):
         ## user supplied aot
