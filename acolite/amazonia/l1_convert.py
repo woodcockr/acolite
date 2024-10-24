@@ -331,7 +331,7 @@ def l1_convert(inputfile, output = None, settings = {}, verbosity=5):
 
             ## get angles from tiff metadata
             for k in ['Elevation', 'Azimuth', 'Gain', 'Integration Time']:
-                match = re.search('{} (\d+(?:\.\d+)?)'.format(k), md['TIFFTAG_IMAGEDESCRIPTION'])
+                match = re.search(r'{} (\d+(?:\.\d+)?)'.format(k), md['TIFFTAG_IMAGEDESCRIPTION'])
                 if match: ds_att[k] = float(match.group(1))
             ds_att['Zenith'] = 90 - ds_att['Elevation']
             b_vaa.append(ds_att['Azimuth'])
