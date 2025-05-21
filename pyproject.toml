@@ -1,0 +1,21 @@
+[project]
+name = "acolite-mp"
+version = "0.1.0"
+description = "Acolite modified to run with multiple cores"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pyresample",
+    "cartopy",
+    "scipy",
+    "numpy",
+    "pyhdf",
+    "gdal==3.8.4",
+    "netcdf4",
+    "h5py",
+    "pygrib",
+    "requests",
+    "matplotlib",
+    "scikit-image",
+    "pyproj"
+]
