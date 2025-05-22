@@ -17,5 +17,13 @@ dependencies = [
     "requests",
     "matplotlib",
     "scikit-image",
-    "pyproj"
+    "pyproj",
+]
+
+[project.optional-dependencies]
+test = [
+    "matplotlib>=3.10.3",
+    "memory-profiler>=0.61.0",
+    "pytest>=8.3.5",
+    "xarray>=2025.4.0",
 ]
