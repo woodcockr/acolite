@@ -39,48 +39,58 @@ import skimage.measure
 
 import acolite as ac
 
+def write_surface_reflectance_outputs(gemo, outputs):
+    """
+    Helper to write outputs from _process_surface_reflectance_band to gemo.
+    """
+    for key, value in outputs.items():
+        ds_name, data, ds_att = value
+        gemo.write(ds_name, data, ds_att=ds_att)
 
 def _process_surface_reflectance_band(
-    b, gem, setu, gemo, luts, lutdw, rsrd, aot_sel, aot_lut, hyper, hyper_res,
+    b, bands, datasets, data_mem, data_att, gatts, setu, luts, lutdw, rsrd, aot_sel, aot_lut, hyper, hyper_res,
     xnew, ynew, ttot_all, segment_data, copy_rhot, sensor_lut, use_revlut, par,
     tiles, per_pixel_geometry, output_file, rho_cirrus,
     ac_opt, gk, exp_lut=None, long_wv=None, short_wv=None, epsilon=None, rhoam=None,
     exp_fixed_epsilon=None, exp_fixed_rhoam=None, mask=None
 ):
-    if ('rhot_ds' not in gem.bands[b]) or ('tt_gas' not in gem.bands[b]):
-        if setu['verbosity'] > 2: print('Band {} at {} nm not in bands dataset'.format(b, gem.bands[b]['wave_name']))
+    # Instead of writing to gemo, collect outputs in a dict
+    outputs = {}
+
+    if ('rhot_ds' not in bands) or ('tt_gas' not in bands):
+        if setu['verbosity'] > 2: print('Band {} at {} nm not in bands dataset'.format(b, bands['wave_name']))
         return None
-    if gem.bands[b]['rhot_ds'] not in gem.datasets:
-        if setu['verbosity'] > 2: print('Band {} at {} nm not in available rhot datasets'.format(b, gem.bands[b]['wave_name']))
+    if bands['rhot_ds'] not in datasets:
+        if setu['verbosity'] > 2: print('Band {} at {} nm not in available rhot datasets'.format(b, bands['wave_name']))
         return None ## skip if we don't have rhot for a band that is in the RSR file
 
     ## temporary fix
-    if (gem.bands[b]['wave_mu'] < 0.345) & (lutdw[luts[0]]['meta']['wave'][0] >= 0.34):
-        if setu['verbosity'] > 2: print('Band {} at {} nm wavelength < 345 nm'.format(b, gem.bands[b]['wave_name']))
+    if (bands['wave_mu'] < 0.345) & (lutdw[luts[0]]['meta']['wave'][0] >= 0.34):
+        if setu['verbosity'] > 2: print('Band {} at {} nm wavelength < 345 nm'.format(b, bands['wave_name']))
         return None ## skip if below LUT range
 
-    dsi = gem.bands[b]['rhot_ds']
-    dso = gem.bands[b]['rhos_ds']
-    cur_data, cur_att = gem.data(dsi, attributes=True)
+    dsi = bands['rhot_ds']
+    dso = bands['rhos_ds']
+    cur_data, cur_att = data_mem[dsi], data_att[dsi]
 
-    ## store rhot in output file
+    # Store rhot if needed
     if copy_rhot:
-        gemo.write(dsi, cur_data, ds_att = cur_att)
+        outputs['rhot'] = (dsi, cur_data.copy(), cur_att.copy())
 
-    if gem.bands[b]['tt_gas'] < setu['min_tgas_rho']:
-        if setu['verbosity'] > 2: print('Band {} at {} nm has tgas < min_tgas_rho ({:.2f} < {:.2f})'.format(b, gem.bands[b]['wave_name'], gem.bands[b]['tt_gas'], setu['min_tgas_rho']))
-        return None
+    if bands['tt_gas'] < setu['min_tgas_rho']:
+        if setu['verbosity'] > 2: print('Band {} at {} nm has tgas < min_tgas_rho ({:.2f} < {:.2f})'.format(b, bands['wave_name'], bands['tt_gas'], setu['min_tgas_rho']))
+        return outputs
 
     ## apply cirrus correction
     if setu['cirrus_correction']:
         g = setu['cirrus_g_vnir'] * 1.0
-        if gem.bands[b]['wave_nm'] > 1000: g = setu['cirrus_g_swir'] * 1.0
+        if bands['wave_nm'] > 1000: g = setu['cirrus_g_swir'] * 1.0
         cur_data -= (rho_cirrus * g)
 
     t0 = time.time()
-    if setu['verbosity'] > 1: print('Computing surface reflectance', b, gem.bands[b]['wave_name'], '{:.3f}'.format(gem.bands[b]['tt_gas']))
+    if setu['verbosity'] > 1: print('Computing surface reflectance', b, bands['wave_name'], '{:.3f}'.format(bands['tt_gas']))
 
-    ds_att = gem.bands[b]
+    ds_att = bands
     ds_att['wavelength']=ds_att['wave_nm']
 
     ## dark spectrum fitting
@@ -98,10 +108,10 @@ def _process_surface_reflectance_band(
         ## use band specific geometry if available
         gk_raa = '{}'.format(gk)
         gk_vza = '{}'.format(gk)
-        if 'raa_{}'.format(gem.bands[b]['wave_name']) in gem.datasets:
-            gk_raa = '_{}'.format(gem.bands[b]['wave_name'])+gk_raa
-        if 'vza_{}'.format(gem.bands[b]['wave_name']) in gem.datasets:
-            gk_vza = '_{}'.format(gem.bands[b]['wave_name'])+gk_vza
+        if 'raa_{}'.format(bands['wave_name']) in datasets:
+            gk_raa = '_{}'.format(bands['wave_name'])+gk_raa
+        if 'vza_{}'.format(bands['wave_name']) in datasets:
+            gk_vza = '_{}'.format(bands['wave_name'])+gk_vza
 
         romix = np.zeros(atm_shape, dtype=np.float32)+np.nan
         astot = np.zeros(atm_shape, dtype=np.float32)+np.nan
@@ -120,17 +130,17 @@ def _process_surface_reflectance_band(
                 ls = np.where(cur_data)
 
             if (use_revlut):
-                xi = [gem.data_mem['pressure'+gk][ls],
-                        gem.data_mem['raa'+gk_raa][ls],
-                        gem.data_mem['vza'+gk_vza][ls],
-                        gem.data_mem['sza'+gk][ls],
-                        gem.data_mem['wind'+gk][ls]]
+                xi = [data_mem['pressure'+gk][ls],
+                        data_mem['raa'+gk_raa][ls],
+                        data_mem['vza'+gk_vza][ls],
+                        data_mem['sza'+gk][ls],
+                        data_mem['wind'+gk][ls]]
             else:
-                xi = [gem.data_mem['pressure'+gk],
-                        gem.data_mem['raa'+gk_raa],
-                        gem.data_mem['vza'+gk_vza],
-                        gem.data_mem['sza'+gk],
-                        gem.data_mem['wind'+gk]]
+                xi = [data_mem['pressure'+gk],
+                        data_mem['raa'+gk_raa],
+                        data_mem['vza'+gk_vza],
+                        data_mem['sza'+gk],
+                        data_mem['wind'+gk]]
                 # subset to number of estimates made for this LUT
                 ## QV 2022-07-28 maybe not needed any more?
                 #if len(xi[0]) > 1:
@@ -194,12 +204,12 @@ def _process_surface_reflectance_band(
             romix_ = romix * 1.0
             astot_ = astot * 1.0
             dutott_ = dutott * 1.0
-            romix = np.zeros(gem.gatts['data_dimensions']) + np.nan
-            astot = np.zeros(gem.gatts['data_dimensions']) + np.nan
-            dutott = np.zeros(gem.gatts['data_dimensions']) + np.nan
+            romix = np.zeros(gatts['data_dimensions']) + np.nan
+            astot = np.zeros(gatts['data_dimensions']) + np.nan
+            dutott = np.zeros(gatts['data_dimensions']) + np.nan
             if (setu['output_ed']):
                 dtott_ = dtott * 1.0
-                dtott = np.zeros(gem.gatts['data_dimensions']) + np.nan
+                dtott = np.zeros(gatts['data_dimensions']) + np.nan
             for sidx, segment in enumerate(segment_data):
                 romix[segment_data[segment]['sub']] = romix_[sidx]
                 astot[segment_data[segment]['sub']] = astot_[sidx]
@@ -212,34 +222,34 @@ def _process_surface_reflectance_band(
         if setu['dsf_write_tiled_parameters']:
             if len(np.atleast_1d(romix)>1):
                 if romix.shape == cur_data.shape:
-                    gemo.write('romix_{}'.format(gem.bands[b]['wave_name']), romix)
+                    outputs['romix'] = ('romix_{}'.format(bands['wave_name']), romix.copy(), None)
                 else:
                     ds_att['romix'] = romix[0]
             if len(np.atleast_1d(astot)>1):
                 if astot.shape == cur_data.shape:
-                    gemo.write('astot_{}'.format(gem.bands[b]['wave_name']), astot)
+                    outputs['astot'] = ('astot_{}'.format(bands['wave_name']), astot.copy(), None)
                 else:
                     ds_att['astot'] = astot[0]
             if len(np.atleast_1d(dutott)>1):
                 if dutott.shape == cur_data.shape:
-                    gemo.write('dutott_{}'.format(gem.bands[b]['wave_name']), dutott)
+                    outputs['dutott'] = ('dutott_{}'.format(bands['wave_name']), dutott.copy(), None)
                 else:
                     ds_att['dutott'] = dutott[0]
 
         ## do atmospheric correction
-        rhot_noatm = (cur_data / gem.bands[b]['tt_gas']) - romix
+        rhot_noatm = (cur_data / bands['tt_gas']) - romix
         del romix
         cur_data = (rhot_noatm) / (dutott + astot*rhot_noatm)
 
         ## compute at surface Ed
         if setu['output_ed']:
-            if 'sza' in gem.datasets:
-                sza = gem.data('sza')
+            if 'sza' in datasets:
+                sza = data_mem['sza']
             else:
-                sza = gem.gatts['sza']
-            se_distance = ac.shared.sun_position(gem.gatts['isodate'], 0, 0)['distance']
+                sza = gatts['sza']
+            se_distance = ac.shared.sun_position(gatts['isodate'], 0, 0)['distance']
             Ed = 1 / (1 - cur_data * astot)
-            Ed *= (gem.bands[b]['F0']) * se_distance**2 * np.cos(np.radians(sza)) * gem.bands[b]['td_gas'] * dtott
+            Ed *= (bands['F0']) * se_distance**2 * np.cos(np.radians(sza)) * bands['td_gas'] * dtott
             del sza
         del astot, dutott, rhot_noatm
 
@@ -250,7 +260,7 @@ def _process_surface_reflectance_band(
         dutotr_cur = lutdw[exp_lut]['rgi'][b]((xi[0], lutdw[exp_lut]['ipd']['dutott'], xi[1], xi[2], xi[3], xi[4], 0.001))
 
         ## get epsilon in current band
-        delta = (long_wv-gem.bands[b]['wave_nm'])/(long_wv-short_wv)
+        delta = (long_wv-bands['wave_nm'])/(long_wv-short_wv)
         eps_cur = np.power(epsilon, delta)
         rhoam_cur = rhoam * eps_cur
 
@@ -265,16 +275,16 @@ def _process_surface_reflectance_band(
     ## write rhorc
     if (setu['output_rhorc']):
         ## read TOA
-        cur_rhorc, cur_att = gem.data(dsi, attributes=True)
+        cur_rhorc, cur_att = data_mem[dsi], data_att[dsi]
 
         ## compute Rayleigh parameters for DSF
         if (ac_opt == 'dsf'):
             ## no subset
-            xi = [gem.data_mem['pressure'+gk],
-                    gem.data_mem['raa'+gk_raa],
-                    gem.data_mem['vza'+gk_vza],
-                    gem.data_mem['sza'+gk],
-                    gem.data_mem['wind'+gk]]
+            xi = [data_mem['pressure'+gk],
+                    data_mem['raa'+gk_raa],
+                    data_mem['vza'+gk_vza],
+                    data_mem['sza'+gk],
+                    data_mem['wind'+gk]]
 
             ## get Rayleigh parameters
             if hyper:
@@ -294,8 +304,8 @@ def _process_surface_reflectance_band(
         if setu['dsf_aot_estimate'] == 'segmented':
             rorayl_ = rorayl_cur * 1.0
             dutotr_ = dutotr_cur * 1.0
-            rorayl_cur = np.zeros(gem.gatts['data_dimensions']) + np.nan
-            dutotr_cur = np.zeros(gem.gatts['data_dimensions']) + np.nan
+            rorayl_cur = np.zeros(gatts['data_dimensions']) + np.nan
+            dutotr_cur = np.zeros(gatts['data_dimensions']) + np.nan
             for sidx, segment in enumerate(segment_data):
                 rorayl_cur[segment_data[segment]['sub']] = rorayl_[sidx]
                 dutotr_cur[segment_data[segment]['sub']] = dutotr_[sidx]
@@ -313,32 +323,34 @@ def _process_surface_reflectance_band(
         if setu['dsf_write_tiled_parameters']:
             if len(np.atleast_1d(rorayl_cur)>1):
                 if rorayl_cur.shape == cur_data.shape:
-                    gemo.write('rorayl_{}'.format(gem.bands[b]['wave_name']), rorayl_cur)
+                    outputs['rorayl'] = ('rorayl_{}'.format(bands['wave_name']), rorayl_cur.copy(), None)
                 else:
                     ds_att['rorayl'] = rorayl_cur[0]
             if len(np.atleast_1d(dutotr_cur)>1):
                 if dutotr_cur.shape == cur_data.shape:
-                    gemo.write('dutotr_{}'.format(gem.bands[b]['wave_name']), dutotr_cur)
+                    outputs['dutotr'] = ('dutotr_{}'.format(bands['wave_name']), dutotr_cur.copy(), None)
                 else:
                     ds_att['dutotr'] = dutotr_cur[0]
 
         cur_rhorc = (cur_rhorc - rorayl_cur) / (dutotr_cur)
-        gemo.write(dso.replace('rhos_', 'rhorc_'), cur_rhorc, ds_att = ds_att)
+        outputs['rhorc'] = (dso.replace('rhos_', 'rhorc_'), cur_rhorc.copy(), ds_att.copy())
         del cur_rhorc, rorayl_cur, dutotr_cur
 
     if ac_opt == 'dsf' and setu['slicing']:
         del valid_mask
 
     ## write rhos
-    gemo.write(dso, cur_data, ds_att = ds_att)
+    outputs['rhos'] = (dso, cur_data.copy(), ds_att.copy())
     del cur_data
 
     ## write Ed data
     if setu['output_ed']:
-        gemo.write(dso.replace('rhos_', 'Ed_'), Ed, ds_att = ds_att)
+        outputs['Ed'] = (dso.replace('rhos_', 'Ed_'), Ed.copy(), ds_att.copy())
         del Ed
 
     if setu['verbosity'] > 1: print('{}/B{} took {:.1f}s ({})'.format(sensor_lut, b, time.time()-t0, 'RevLUT' if use_revlut else 'StdLUT'))
+
+    return outputs
 
 def acolite_l2r(gem,
                 output = None,
@@ -349,8 +361,6 @@ def acolite_l2r(gem,
                 target_file = None,
 
                 return_gem = False):
-
-
 
     time_start = datetime.datetime.now()
 
@@ -1708,22 +1718,32 @@ def acolite_l2r(gem,
 
     hyper_res = None
     ## compute surface reflectances
+    all_outputs = []
+
+    # Ensure all gem data in memory (gem.data_mem)
+    for ds in gem.datasets:
+        gem.data(ds, store=True, return_data=False)
+
     for bi, b in enumerate(gem.bands):
         if (ac_opt == 'dsf'):
-            _process_surface_reflectance_band(
-                b, gem, setu, gemo, luts, lutdw, rsrd, aot_sel, aot_lut, hyper, hyper_res,
+            outputs = _process_surface_reflectance_band(
+                b, gem.bands[b], gem.datasets, gem.data_mem, gem.data_att, gem.gatts, setu, luts, lutdw, rsrd, aot_sel, aot_lut, hyper, hyper_res,
                 xnew, ynew, ttot_all, segment_data, copy_rhot, sensor_lut, use_revlut, par,
                 tiles, per_pixel_geometry, output_file, rho_cirrus,
                 ac_opt, gk
                 )
         elif (ac_opt == 'exp'):
-            _process_surface_reflectance_band(
-                b, gem, setu, gemo, luts, lutdw, rsrd, aot_sel, aot_lut, hyper, hyper_res,
+            outputs = _process_surface_reflectance_band(
+                b, gem.bands[b], gem.datasets, gem.data_mem, gem.data_att, gem.gatts, setu, luts, lutdw, rsrd, aot_sel, aot_lut, hyper, hyper_res,
                 xnew, ynew, ttot_all, segment_data, copy_rhot, sensor_lut, use_revlut, par,
                 tiles, per_pixel_geometry, output_file, rho_cirrus,
                 ac_opt, gk, exp_lut=exp_lut, long_wv=long_wv, short_wv=short_wv, epsilon=epsilon, rhoam=rhoam,
                 exp_fixed_epsilon=exp_fixed_epsilon, exp_fixed_rhoam=exp_fixed_rhoam, mask=mask
                 )
+        if outputs is not None:
+            all_outputs.append(outputs)
+    for outputs in all_outputs:
+        write_surface_reflectance_outputs(gemo, outputs)
 
     ## update outputfile dataset info
     gemo.datasets_read()
