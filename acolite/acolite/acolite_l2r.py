@@ -987,65 +987,13 @@ def acolite_l2r(gem,
 
                 ## fixed path reflectance
                 if setu['dsf_aot_estimate'] == 'fixed':
-                    band_data_copy = band_data * 1.0
-                    if setu['dsf_spectrum_option'] == 'darkest':
-                        band_data = np.array((np.nanpercentile(band_data[band_sub], 0)))
-                    if setu['dsf_spectrum_option'] == 'percentile':
-                        band_data = np.array((np.nanpercentile(band_data[band_sub], setu['dsf_percentile'])))
-                    if setu['dsf_spectrum_option'] == 'intercept':
-                        band_data = ac.shared.intercept(band_data[band_sub], setu['dsf_intercept_pixels'])
-                    band_data.shape+=(1,1) ## make 1,1 dimensions
-                    gk='_mean'
-                    dark_pixel_location = np.where(band_data_copy <= band_data)
-                    if len(dark_pixel_location[0]) != 0:
-                        dark_pixel_location_x = dark_pixel_location[0][0]
-                        dark_pixel_location_y = dark_pixel_location[1][0]
-                    #    print(dark_pixel_location_x, dark_pixel_location_y)
-                    #    print(band_data)
-                    #if not use_revlut:
-                    #    gk='_mean'
-                    #else:
-                    #    band_data = np.tile(band_data, band_shape)
-                    if setu['verbosity'] > 2: print(b, setu['dsf_spectrum_option'], '{:.3f}'.format(float(band_data[0,0])))
-
-                ## tiled path reflectance
+                    band_data, gk, dark_pixel_location = _dsf_fixed_path_reflectance(band_data, band_sub, setu, ac, b)
                 elif setu['dsf_aot_estimate'] == 'tiled':
-                    gk = '_tiled'
-
-                    ## tile this band data
-                    tile_data = np.zeros((tiles[-1][0]+1, tiles[-1][1]+1), dtype=np.float32) + np.nan
-                    for t in range(len(tiles)):
-                        ti, tj, subti, subtj = tiles[t]
-                        tsub = band_data[subti[0]:subti[1], subtj[0]:subtj[1]]
-                        tel = (subtj[1]-subtj[0]) * (subti[1]-subti[0])
-                        nsub = len(np.where(np.isfinite(tsub))[0])
-                        if nsub < tel * float(setu['dsf_min_tile_cover']): continue
-
-                        ## get per tile darkest
-                        if setu['dsf_spectrum_option'] == 'darkest':
-                            tile_data[ti,tj] = np.array((np.nanpercentile(tsub, 0)))
-                        if setu['dsf_spectrum_option'] == 'percentile':
-                            tile_data[ti,tj] = np.array((np.nanpercentile(tsub, setu['dsf_percentile'])))
-                        if setu['dsf_spectrum_option'] == 'intercept':
-                            tile_data[ti,tj] = ac.shared.intercept(tsub, int(setu['dsf_intercept_pixels']))
-                        del tsub
-
-                    ## fill nan tiles with closest values
-                    ind = scipy.ndimage.distance_transform_edt(np.isnan(tile_data), return_distances=False, return_indices=True)
-                    band_data = tile_data[tuple(ind)]
-                    del tile_data, ind
-
-                ## image is segmented based on input vector mask
+                    ## tiled path reflectance
+                    band_data, gk = _dsf_tiled_path_reflectance(band_data, tiles, setu, ac)
                 elif setu['dsf_aot_estimate'] == 'segmented':
-                    gk = '_segmented'
-                    if setu['dsf_spectrum_option'] == 'darkest':
-                        band_data = np.array([np.nanpercentile(band_data[segment_data[segment]['sub']], 0)[0] for segment in segment_data])
-                    if setu['dsf_spectrum_option'] == 'percentile':
-                        band_data = np.array([np.nanpercentile(band_data[segment_data[segment]['sub']], setu['dsf_percentile'])[0] for segment in segment_data])
-                    if setu['dsf_spectrum_option'] == 'intercept':
-                        band_data = np.array([ac.shared.intercept(band_data[segment_data[segment]['sub']], setu['dsf_intercept_pixels'])  for segment in segment_data])
-                    band_data.shape+=(1,1) ## make 2 dimensions
-
+                    ## image is segmented based on input vector mask
+                    band_data, gk = _dsf_segmented_path_reflectance(band_data, segment_data, setu, ac)
                 ## resolved per pixel dsf
                 elif setu['dsf_aot_estimate'] == 'resolved':
                     if not setu['resolved_geometry']: gk = '_mean'
@@ -1061,33 +1009,7 @@ def acolite_l2r(gem,
 
                 ## do noise bias correction
                 if (setu['sensor_noise_bias_correction']) & ('sensor_noise' in gem.bands[b]):
-                    if gem.bands[b]['sensor_noise'] > 0:
-                        if setu['sensor_noise_bias_correction_sigma_factor'] is not None:
-                            print('Performing sensor noise bias correction for band {} with {} x {}'.format(b, setu['sensor_noise_bias_correction_sigma_factor'], gem.bands[b]['sensor_noise']))
-                            noise_offset = gem.bands[b]['sensor_noise'] * setu['sensor_noise_bias_correction_sigma_factor']
-                        else:
-                            if setu['dsf_spectrum_option'] == 'percentile':
-                                zf = scipy.stats.norm.ppf(1-(setu['dsf_percentile'])/100)
-                                print('Using sigma factor of {:.3f} based on dsf_percentile = {}'.format(zf, setu['dsf_percentile']))
-                            else:
-                                zf = 2
-                                print('Warning: Use of sensor_noise_bias_correction without sigma factor is recommended for dsf_spectrum_option=percentile')
-                                print('Warning: Using default sigma factor = {:.3f}'.format(zf))
-                            print('Performing sensor noise bias correction for band {} with {:.3f} x {}'.format(b, zf, gem.bands[b]['sensor_noise']))
-                            noise_offset = gem.bands[b]['sensor_noise'] * zf
-
-                        ## reduce noise offset by 1/n
-                        noise_offset *= 1/n_noise
-                        print('Performing sensor noise bias correction with noise reduction of 1/{}'.format(n_noise))
-
-                        if setu['sensor_noise_bias_correction_sun_zenith']:
-                            szaf = np.cos(np.radians(gem.data_mem['sza'+gk][band_sub]))
-                            print('Performing sensor noise bias correction with sun zenith angle factor applied (mean = {:.3f})'.format(1/np.nanmean(szaf)))
-                            band_data += noise_offset / szaf
-                            del szaf
-                        else:
-                            band_data += noise_offset
-                ## end noise bias correction
+                    band_data = _apply_noise_bias_correction(band_data, gem, b, setu, n_noise, gk, band_sub)
 
                 ## do gas correction
                 band_data[band_sub] /= gem.bands[b]['tt_gas']
@@ -1105,99 +1027,9 @@ def acolite_l2r(gem,
                     gk_vza = '_{}'.format(gem.bands[b]['wave_name'])+gk_vza
 
                 ## compute aot
-                aot_band = {}
-                for li, lut in enumerate(luts):
-                    rhot_aot = None ## set rhot_aot to None for next LUT
-                    aot_band[lut] = np.zeros(band_data.shape, dtype=np.float32)+np.nan
-                    t0 = time.time()
-
-                    ## reverse lut interpolates rhot directly to aot
-                    if use_revlut:
-                        if len(revl[lut]['rgi'][b].grid) == 5:
-                            aot_band[lut][band_sub] = revl[lut]['rgi'][b]((gem.data_mem['pressure'+gk][band_sub],
-                                                                               gem.data_mem['raa'+gk_raa][band_sub],
-                                                                               gem.data_mem['vza'+gk_vza][band_sub],
-                                                                               gem.data_mem['sza'+gk][band_sub],
-                                                                               band_data[band_sub]))
-                        else:
-                            aot_band[lut][band_sub] = revl[lut]['rgi'][b]((gem.data_mem['pressure'+gk][band_sub],
-                                                                               gem.data_mem['raa'+gk_raa][band_sub],
-                                                                               gem.data_mem['vza'+gk_vza][band_sub],
-                                                                               gem.data_mem['sza'+gk][band_sub],
-                                                                               gem.data_mem['wind'+gk][band_sub],
-                                                                               band_data[band_sub]))
-                        # mask out of range aot
-                        aot_band[lut][aot_band[lut]<=revl[lut]['minaot']]=np.nan
-                        aot_band[lut][aot_band[lut]>=revl[lut]['maxaot']]=np.nan
-
-                        ## replace nans with closest aot
-                        if (setu['dsf_aot_fillnan']): aot_band[lut] = ac.shared.fillnan(aot_band[lut])
-
-                    ## standard lut interpolates rhot to results for different aot values
-                    else:
-                        ## get rho path for lut steps in aot
-                        if hyper:
-                            # get modeled rhot for each wavelength
-                            if rhot_aot is None:
-                                ## set up array to store modeled rhot
-                                rhot_aot = np.zeros((len(lutdw[lut]['meta']['tau']), \
-                                                     len(lutdw[lut]['meta']['wave']), \
-                                                     len(gem.data_mem['pressure'+gk].flatten())))
-
-                                ## compute rhot for range of aot
-                                for ai, aot in enumerate(lutdw[lut]['meta']['tau']):
-                                    for pi in range(rhot_aot.shape[2]):
-                                        tmp = lutdw[lut]['rgi']((gem.data_mem['pressure'+gk].flatten()[pi],
-                                                                  lutdw[lut]['ipd'][par],
-                                                                  lutdw[lut]['meta']['wave'],
-                                                                  gem.data_mem['raa'+gk_raa].flatten()[pi],
-                                                                  gem.data_mem['vza'+gk_vza].flatten()[pi],
-                                                                  gem.data_mem['sza'+gk].flatten()[pi],
-                                                                  gem.data_mem['wind'+gk].flatten()[pi], aot))
-                                        ## store current result
-                                        rhot_aot[ai,:,pi] = tmp.flatten()
-                                if setu['verbosity'] > 4: print('Shape of modeled rhot: {}'.format(rhot_aot.shape))
-                            ## resample modeled results to current band
-                            tmp = ac.shared.rsr_convolute_nd(rhot_aot, lutdw[lut]['meta']['wave'], rsrd['rsr'][b]['response'], rsrd['rsr'][b]['wave'], axis=1)
-
-                            ## interpolate rho path to observation
-                            aotret = np.zeros(aot_band[lut][band_sub].flatten().shape)
-                            ## interpolate to observed rhot
-                            for ri, crho in enumerate(band_data.flatten()):
-                                aotret[ri] = np.interp(crho, tmp[:,ri], lutdw[lut]['meta']['tau'], left=left, right=right)
-                            if setu['verbosity'] > 4: print('Shape of computed aot: {}'.format(aotret.shape))
-                            if setu['verbosity'] > 5: print('Computed aot: {}'.format(aotret))
-                            aot_band[lut][band_sub] = aotret.reshape(aot_band[lut][band_sub].shape)
-                        else:
-                            if len(gem.data_mem['pressure'+gk]) > 1:
-                                for gki in range(len(gem.data_mem['pressure'+gk])):
-                                    tmp = lutdw[lut]['rgi'][b]((gem.data_mem['pressure'+gk][gki],
-                                                                lutdw[lut]['ipd'][par],
-                                                                gem.data_mem['raa'+gk_raa][gki],
-                                                                gem.data_mem['vza'+gk_vza][gki],
-                                                                gem.data_mem['sza'+gk][gki],
-                                                                gem.data_mem['wind'+gk][gki], lutdw[lut]['meta']['tau']))
-                                    tmp = tmp.flatten()
-                                    aot_band[lut][gki] = np.interp(band_data[gki], tmp, lutdw[lut]['meta']['tau'], left=left, right=right)
-                            else:
-                                tmp = lutdw[lut]['rgi'][b]((gem.data_mem['pressure'+gk],
-                                                            lutdw[lut]['ipd'][par],
-                                                            gem.data_mem['raa'+gk_raa],
-                                                            gem.data_mem['vza'+gk_vza],
-                                                            gem.data_mem['sza'+gk],
-                                                            gem.data_mem['wind'+gk], lutdw[lut]['meta']['tau']))
-                                tmp = tmp.flatten()
-
-                                ## interpolate rho path to observation
-                                aot_band[lut][band_sub] = np.interp(band_data[band_sub], tmp, lutdw[lut]['meta']['tau'], left=left, right=right)
-
-                    ## mask minimum/maximum tile aots
-                    if setu['dsf_aot_estimate'] == 'tiled':
-                        aot_band[lut][aot_band[lut]<setu['dsf_min_tile_aot']]=np.nan
-                        aot_band[lut][aot_band[lut]>setu['dsf_max_tile_aot']]=np.nan
-
-                    tel = time.time()-t0
-                    if setu['verbosity'] > 1: print('{}/B{} {} took {:.3f}s ({})'.format(sensor_lut, b, lut, tel, 'RevLUT' if use_revlut else 'StdLUT'))
+                aot_band = _compute_aot_band(
+                    band_data, band_sub, gk, gk_raa, gk_vza, luts, lutdw, revl, use_revlut, hyper, setu, gem, b, par, rsrd, left, right
+                )
 
                 ## store current band results
                 aot_dict[b] = aot_band
@@ -1213,78 +1045,7 @@ def acolite_l2r(gem,
                 return()
 
             ## get min aot per pixel
-            aot_stack = {}
-            for li, lut in enumerate(luts):
-                aot_band_list = []
-                ## stack aot for this lut
-                for bi, b in enumerate(aot_bands):
-                    if b not in aot_dict: continue
-                    aot_band_list.append(b)
-                    if lut not in aot_stack:
-                        aot_stack[lut] = {'all': np.atleast_3d(aot_dict[b][lut])}
-                    else:
-                        aot_stack[lut]['all'] = np.dstack((aot_stack[lut]['all'], aot_dict[b][lut]))
-                aot_stack[lut]['band_list'] = aot_band_list
-
-                ## sort aot per pixel
-                tmp = np.argsort(aot_stack[lut]['all'], axis=2)
-                ay, ax = np.meshgrid(np.arange(tmp.shape[1]), np.arange(tmp.shape[0]))
-
-                ## identify number of bands
-                if setu['dsf_nbands']<2: setu['dsf_nbands'] = 2
-                if setu['dsf_nbands']>tmp.shape[2]: setu['dsf_nbands'] = tmp.shape[2]
-                if setu['dsf_nbands_fit']<2: setu['dsf_nbands_fit'] = 2
-                if setu['dsf_nbands_fit']>tmp.shape[2]: setu['dsf_nbands_fit'] = tmp.shape[2]
-
-                ## get minimum or average aot
-                if setu['dsf_aot_compute'] in ['mean', 'median']:
-                    print('Using dsf_aot_compute = {}'.format(setu['dsf_aot_compute']))
-                    ## stack n lowest bands
-                    for ai in range(setu['dsf_nbands']):
-                        if ai == 0:
-                            tmp_aot = aot_stack[lut]['all'][ax, ay, tmp[ax,ay,ai]] * 1.0
-                        else:
-                            tmp_aot = np.dstack((tmp_aot, aot_stack[lut]['all'][ax, ay, tmp[ax,ay,ai]] * 1.0))
-                    ## compute mean over stack
-                    if setu['dsf_aot_compute'] == 'mean': aot_stack[lut]['aot'] = np.nanmean(tmp_aot, axis=2)
-                    if setu['dsf_aot_compute'] == 'median': aot_stack[lut]['aot'] = np.nanmedian(tmp_aot, axis=2)
-                    if setu['dsf_aot_estimate'] == 'fixed': print('Using dsf_aot_compute = {} {} aot = {:.3f}'.format(setu['dsf_aot_compute'], lut, float(aot_stack[lut]['aot'].flatten())))
-                    tmp_aot = None
-                else:
-                    aot_stack[lut]['aot'] = aot_stack[lut]['all'][ax,ay,tmp[ax,ay,0]] #np.nanmin(aot_stack[lut]['all'], axis=2)
-
-                ## if minimum for fixed retrieval is nan, set it to 0.01
-                if setu['dsf_aot_estimate'] == 'fixed':
-                    if np.isnan(aot_stack[lut]['aot']): aot_stack[lut]['aot'][0][0] = 0.01
-                aot_stack[lut]['mask'] = ~np.isfinite(aot_stack[lut]['aot'])
-
-                ## apply percentile filter
-                if (setu['dsf_filter_aot']) & (setu['dsf_aot_estimate'] == 'resolved'):
-                    aot_stack[lut]['aot'] = \
-                        scipy.ndimage.percentile_filter(aot_stack[lut]['aot'],
-                                                        setu['dsf_filter_percentile'],
-                                                        size=setu['dsf_filter_box'])
-                ## apply gaussian kernel smoothing
-                if (setu['dsf_smooth_aot']) & (setu['dsf_aot_estimate'] == 'resolved'):
-                    ## for gaussian smoothing of aot
-                    aot_stack[lut]['aot'] = scipy.ndimage.gaussian_filter(aot_stack[lut]['aot'], setu['dsf_smooth_box'], order=0, mode='nearest')
-
-                ## mask aot
-                aot_stack[lut]['aot'][aot_stack[lut]['mask']] = np.nan
-
-                ## store bands for fitting rmsd
-                for bbi in range(setu['dsf_nbands_fit']):
-                    aot_stack[lut]['b{}'.format(bbi+1)] = tmp[:,:,bbi].astype(int)#.astype(float)
-                    aot_stack[lut]['b{}'.format(bbi+1)][aot_stack[lut]['mask']] = -1
-
-                if setu['dsf_model_selection'] == 'min_dtau':
-                    ## array idices
-                    aid = np.indices(aot_stack[lut]['all'].shape[0:2])
-                    ## abs difference between first and second band tau
-                    aot_stack[lut]['dtau'] = np.abs(aot_stack[lut]['all'][aid[0,:],aid[1,:],tmp[:,:,0]]-\
-                                                    aot_stack[lut]['all'][aid[0,:],aid[1,:],tmp[:,:,1]])
-                ## remove sorted indices
-                tmp = None
+            aot_stack = _compute_aot_stack(aot_bands, aot_dict, luts, setu)
 
             ## select model based on min rmsd for 2 bands
             if setu['verbosity'] > 1: print('Choosing best fitting model: {} ({} bands)'.format(setu['dsf_model_selection'], setu['dsf_nbands']))
@@ -2192,3 +1953,323 @@ def _apply_sensor_noise_bias_correction(band_data, gem, b, setu):
             d_mean = d_2.mean(axis = (0,1))
             band_data = d_mean * 1.0
     return band_data, n_noise
+
+def _dsf_fixed_path_reflectance(band_data, band_sub, setu, ac, b):
+    """
+    Handles the 'fixed' dsf_aot_estimate clause.
+    Returns band_data, gk, and optionally dark_pixel_location.
+    """
+    band_data_copy = band_data * 1.0
+    if setu['dsf_spectrum_option'] == 'darkest':
+        band_data = np.array((np.nanpercentile(band_data[band_sub], 0)))
+    if setu['dsf_spectrum_option'] == 'percentile':
+        band_data = np.array((np.nanpercentile(band_data[band_sub], setu['dsf_percentile'])))
+    if setu['dsf_spectrum_option'] == 'intercept':
+        band_data = ac.shared.intercept(band_data[band_sub], setu['dsf_intercept_pixels'])
+    band_data.shape += (1, 1)  # make 1,1 dimensions
+    gk = '_mean'
+    dark_pixel_location = np.where(band_data_copy <= band_data)
+    if len(dark_pixel_location[0]) != 0:
+        dark_pixel_location_x = dark_pixel_location[0][0]
+        dark_pixel_location_y = dark_pixel_location[1][0]
+    else:
+        dark_pixel_location_x = None
+        dark_pixel_location_y = None
+    if setu['verbosity'] > 2:
+        print(b, setu['dsf_spectrum_option'], '{:.3f}'.format(float(band_data[0, 0])))
+    return band_data, gk, (dark_pixel_location_x, dark_pixel_location_y)
+
+def _dsf_tiled_path_reflectance(band_data, tiles, setu, ac):
+    """
+    Handles the 'tiled' dsf_aot_estimate clause.
+    Returns band_data and gk.
+    """
+    gk = '_tiled'
+    tile_data = np.zeros((tiles[-1][0] + 1, tiles[-1][1] + 1), dtype=np.float32) + np.nan
+    for t in range(len(tiles)):
+        ti, tj, subti, subtj = tiles[t]
+        tsub = band_data[subti[0]:subti[1], subtj[0]:subtj[1]]
+        tel = (subtj[1] - subtj[0]) * (subti[1] - subti[0])
+        nsub = len(np.where(np.isfinite(tsub))[0])
+        if nsub < tel * float(setu['dsf_min_tile_cover']):
+            continue
+        if setu['dsf_spectrum_option'] == 'darkest':
+            tile_data[ti, tj] = np.array((np.nanpercentile(tsub, 0)))
+        if setu['dsf_spectrum_option'] == 'percentile':
+            tile_data[ti, tj] = np.array((np.nanpercentile(tsub, setu['dsf_percentile'])))
+        if setu['dsf_spectrum_option'] == 'intercept':
+            tile_data[ti, tj] = ac.shared.intercept(tsub, int(setu['dsf_intercept_pixels']))
+        del tsub
+    ind = scipy.ndimage.distance_transform_edt(np.isnan(tile_data), return_distances=False, return_indices=True)
+    band_data = tile_data[tuple(ind)]
+    del tile_data, ind
+    return band_data, gk
+
+def _dsf_segmented_path_reflectance(band_data, segment_data, setu, ac):
+    """
+    Handles the 'segmented' dsf_aot_estimate clause.
+    Returns band_data and gk.
+    """
+    gk = '_segmented'
+    if setu['dsf_spectrum_option'] == 'darkest':
+        band_data = np.array([np.nanpercentile(band_data[segment_data[segment]['sub']], 0)[0] for segment in segment_data])
+    if setu['dsf_spectrum_option'] == 'percentile':
+        band_data = np.array([np.nanpercentile(band_data[segment_data[segment]['sub']], setu['dsf_percentile'])[0] for segment in segment_data])
+    if setu['dsf_spectrum_option'] == 'intercept':
+        band_data = np.array([ac.shared.intercept(band_data[segment_data[segment]['sub']], setu['dsf_intercept_pixels']) for segment in segment_data])
+    band_data.shape += (1, 1)  # make 2 dimensions
+    return band_data, gk
+
+def _apply_noise_bias_correction(
+    band_data, gem, b, setu, n_noise, gk, band_sub
+):
+    """
+    Applies the sensor noise bias correction with sigma factor to band_data.
+    Modifies band_data in-place and returns it.
+    """
+    if gem.bands[b]['sensor_noise'] > 0:
+        if setu['sensor_noise_bias_correction_sigma_factor'] is not None:
+            print('Performing sensor noise bias correction for band {} with {} x {}'.format(
+                b, setu['sensor_noise_bias_correction_sigma_factor'], gem.bands[b]['sensor_noise']))
+            noise_offset = gem.bands[b]['sensor_noise'] * setu['sensor_noise_bias_correction_sigma_factor']
+        else:
+            if setu['dsf_spectrum_option'] == 'percentile':
+                zf = scipy.stats.norm.ppf(1-(setu['dsf_percentile'])/100)
+                print('Using sigma factor of {:.3f} based on dsf_percentile = {}'.format(zf, setu['dsf_percentile']))
+            else:
+                zf = 2
+                print('Warning: Use of sensor_noise_bias_correction without sigma factor is recommended for dsf_spectrum_option=percentile')
+                print('Warning: Using default sigma factor = {:.3f}'.format(zf))
+            print('Performing sensor noise bias correction for band {} with {:.3f} x {}'.format(b, zf, gem.bands[b]['sensor_noise']))
+            noise_offset = gem.bands[b]['sensor_noise'] * zf
+
+        # reduce noise offset by 1/n
+        noise_offset *= 1/n_noise
+        print('Performing sensor noise bias correction with noise reduction of 1/{}'.format(n_noise))
+
+        if setu['sensor_noise_bias_correction_sun_zenith']:
+            szaf = np.cos(np.radians(gem.data_mem['sza'+gk][band_sub]))
+            print('Performing sensor noise bias correction with sun zenith angle factor applied (mean = {:.3f})'.format(1/np.nanmean(szaf)))
+            band_data += noise_offset / szaf
+            del szaf
+        else:
+            band_data += noise_offset
+    return band_data
+
+def _compute_aot_band(
+    band_data, band_sub, gk, gk_raa, gk_vza, luts, lutdw, revl, use_revlut, hyper, setu, gem, b, par, rsrd, left, right
+):
+    """
+    Compute aot_band for a single band.
+    Returns aot_band (dict of arrays, one per LUT).
+    """
+    aot_band = {}
+    for li, lut in enumerate(luts):
+        rhot_aot = None  # set rhot_aot to None for next LUT
+        aot_band[lut] = np.zeros(band_data.shape, dtype=np.float32) + np.nan
+        t0 = time.time()
+
+        # reverse lut interpolates rhot directly to aot
+        if use_revlut:
+            if len(revl[lut]['rgi'][b].grid) == 5:
+                aot_band[lut][band_sub] = revl[lut]['rgi'][b]((
+                    gem.data_mem['pressure'+gk][band_sub],
+                    gem.data_mem['raa'+gk_raa][band_sub],
+                    gem.data_mem['vza'+gk_vza][band_sub],
+                    gem.data_mem['sza'+gk][band_sub],
+                    band_data[band_sub]
+                ))
+            else:
+                aot_band[lut][band_sub] = revl[lut]['rgi'][b]((
+                    gem.data_mem['pressure'+gk][band_sub],
+                    gem.data_mem['raa'+gk_raa][band_sub],
+                    gem.data_mem['vza'+gk_vza][band_sub],
+                    gem.data_mem['sza'+gk][band_sub],
+                    gem.data_mem['wind'+gk][band_sub],
+                    band_data[band_sub]
+                ))
+            # mask out of range aot
+            aot_band[lut][aot_band[lut] <= revl[lut]['minaot']] = np.nan
+            aot_band[lut][aot_band[lut] >= revl[lut]['maxaot']] = np.nan
+
+            # replace nans with closest aot
+            if setu['dsf_aot_fillnan']:
+                aot_band[lut] = ac.shared.fillnan(aot_band[lut])
+
+        # standard lut interpolates rhot to results for different aot values
+        else:
+            # get rho path for lut steps in aot
+            if hyper:
+                # get modeled rhot for each wavelength
+                if rhot_aot is None:
+                    rhot_aot = np.zeros((
+                        len(lutdw[lut]['meta']['tau']),
+                        len(lutdw[lut]['meta']['wave']),
+                        len(gem.data_mem['pressure'+gk].flatten())
+                    ))
+                    # compute rhot for range of aot
+                    for ai, aot in enumerate(lutdw[lut]['meta']['tau']):
+                        for pi in range(rhot_aot.shape[2]):
+                            tmp = lutdw[lut]['rgi']((
+                                gem.data_mem['pressure'+gk].flatten()[pi],
+                                lutdw[lut]['ipd'][par],
+                                lutdw[lut]['meta']['wave'],
+                                gem.data_mem['raa'+gk_raa].flatten()[pi],
+                                gem.data_mem['vza'+gk_vza].flatten()[pi],
+                                gem.data_mem['sza'+gk].flatten()[pi],
+                                gem.data_mem['wind'+gk].flatten()[pi], aot
+                            ))
+                            rhot_aot[ai, :, pi] = tmp.flatten()
+                    if setu['verbosity'] > 4:
+                        print('Shape of modeled rhot: {}'.format(rhot_aot.shape))
+                # resample modeled results to current band
+                tmp = ac.shared.rsr_convolute_nd(
+                    rhot_aot, lutdw[lut]['meta']['wave'],
+                    rsrd['rsr'][b]['response'], rsrd['rsr'][b]['wave'], axis=1
+                )
+                # interpolate rho path to observation
+                aotret = np.zeros(aot_band[lut][band_sub].flatten().shape)
+                for ri, crho in enumerate(band_data.flatten()):
+                    aotret[ri] = np.interp(crho, tmp[:, ri], lutdw[lut]['meta']['tau'], left=left, right=right)
+                if setu['verbosity'] > 4:
+                    print('Shape of computed aot: {}'.format(aotret.shape))
+                if setu['verbosity'] > 5:
+                    print('Computed aot: {}'.format(aotret))
+                aot_band[lut][band_sub] = aotret.reshape(aot_band[lut][band_sub].shape)
+            else:
+                if len(gem.data_mem['pressure'+gk]) > 1:
+                    for gki in range(len(gem.data_mem['pressure'+gk])):
+                        tmp = lutdw[lut]['rgi'][b]((
+                            gem.data_mem['pressure'+gk][gki],
+                            lutdw[lut]['ipd'][par],
+                            gem.data_mem['raa'+gk_raa][gki],
+                            gem.data_mem['vza'+gk_vza][gki],
+                            gem.data_mem['sza'+gk][gki],
+                            gem.data_mem['wind'+gk][gki], lutdw[lut]['meta']['tau']
+                        ))
+                        tmp = tmp.flatten()
+                        aot_band[lut][gki] = np.interp(
+                            band_data[gki], tmp, lutdw[lut]['meta']['tau'], left=left, right=right
+                        )
+                else:
+                    tmp = lutdw[lut]['rgi'][b]((
+                        gem.data_mem['pressure'+gk],
+                        lutdw[lut]['ipd'][par],
+                        gem.data_mem['raa'+gk_raa],
+                        gem.data_mem['vza'+gk_vza],
+                        gem.data_mem['sza'+gk],
+                        gem.data_mem['wind'+gk], lutdw[lut]['meta']['tau']
+                    ))
+                    tmp = tmp.flatten()
+                    aot_band[lut][band_sub] = np.interp(
+                        band_data[band_sub], tmp, lutdw[lut]['meta']['tau'], left=left, right=right
+                    )
+
+        # mask minimum/maximum tile aots
+        if setu['dsf_aot_estimate'] == 'tiled':
+            aot_band[lut][aot_band[lut] < setu['dsf_min_tile_aot']] = np.nan
+            aot_band[lut][aot_band[lut] > setu['dsf_max_tile_aot']] = np.nan
+
+        tel = time.time() - t0
+        if setu['verbosity'] > 1:
+            print('{}/B{} {} took {:.3f}s ({})'.format(
+                gem.gatts['sensor'], b, lut, tel, 'RevLUT' if use_revlut else 'StdLUT'
+            ))
+    return aot_band
+
+def _compute_aot_stack(aot_bands, aot_dict, luts, setu):
+    """
+    Compute the aot_stack dictionary for all LUTs, including band stacking, sorting, masking, and filtering.
+    Returns aot_stack.
+    """
+    aot_stack = {}
+    for li, lut in enumerate(luts):
+        aot_band_list = []
+        # stack aot for this lut
+        for bi, b in enumerate(aot_bands):
+            if b not in aot_dict:
+                continue
+            aot_band_list.append(b)
+            if lut not in aot_stack:
+                aot_stack[lut] = {'all': np.atleast_3d(aot_dict[b][lut])}
+            else:
+                aot_stack[lut]['all'] = np.dstack((aot_stack[lut]['all'], aot_dict[b][lut]))
+        aot_stack[lut]['band_list'] = aot_band_list
+
+        # sort aot per pixel
+        tmp = np.argsort(aot_stack[lut]['all'], axis=2)
+        ay, ax = np.meshgrid(np.arange(tmp.shape[1]), np.arange(tmp.shape[0]))
+
+        # identify number of bands
+        if setu['dsf_nbands'] < 2:
+            setu['dsf_nbands'] = 2
+        if setu['dsf_nbands'] > tmp.shape[2]:
+            setu['dsf_nbands'] = tmp.shape[2]
+        if setu['dsf_nbands_fit'] < 2:
+            setu['dsf_nbands_fit'] = 2
+        if setu['dsf_nbands_fit'] > tmp.shape[2]:
+            setu['dsf_nbands_fit'] = tmp.shape[2]
+
+        # get minimum or average aot
+        if setu['dsf_aot_compute'] in ['mean', 'median']:
+            print('Using dsf_aot_compute = {}'.format(setu['dsf_aot_compute']))
+            # stack n lowest bands
+            for ai in range(setu['dsf_nbands']):
+                if ai == 0:
+                    tmp_aot = aot_stack[lut]['all'][ax, ay, tmp[ax, ay, ai]] * 1.0
+                else:
+                    tmp_aot = np.dstack((tmp_aot, aot_stack[lut]['all'][ax, ay, tmp[ax, ay, ai]] * 1.0))
+            # compute mean over stack
+            if setu['dsf_aot_compute'] == 'mean':
+                aot_stack[lut]['aot'] = np.nanmean(tmp_aot, axis=2)
+            if setu['dsf_aot_compute'] == 'median':
+                aot_stack[lut]['aot'] = np.nanmedian(tmp_aot, axis=2)
+            if setu['dsf_aot_estimate'] == 'fixed':
+                print('Using dsf_aot_compute = {} {} aot = {:.3f}'.format(
+                    setu['dsf_aot_compute'], lut, float(aot_stack[lut]['aot'].flatten())))
+            tmp_aot = None
+        else:
+            aot_stack[lut]['aot'] = aot_stack[lut]['all'][ax, ay, tmp[ax, ay, 0]]  # np.nanmin(aot_stack[lut]['all'], axis=2)
+
+        # if minimum for fixed retrieval is nan, set it to 0.01
+        if setu['dsf_aot_estimate'] == 'fixed':
+            if np.isnan(aot_stack[lut]['aot']):
+                aot_stack[lut]['aot'][0][0] = 0.01
+        aot_stack[lut]['mask'] = ~np.isfinite(aot_stack[lut]['aot'])
+
+        # apply percentile filter
+        if (setu['dsf_filter_aot']) & (setu['dsf_aot_estimate'] == 'resolved'):
+            aot_stack[lut]['aot'] = \
+                scipy.ndimage.percentile_filter(
+                    aot_stack[lut]['aot'],
+                    setu['dsf_filter_percentile'],
+                    size=setu['dsf_filter_box']
+                )
+        # apply gaussian kernel smoothing
+        if (setu['dsf_smooth_aot']) & (setu['dsf_aot_estimate'] == 'resolved'):
+            aot_stack[lut]['aot'] = scipy.ndimage.gaussian_filter(
+                aot_stack[lut]['aot'],
+                setu['dsf_smooth_box'],
+                order=0,
+                mode='nearest'
+            )
+
+        # mask aot
+        aot_stack[lut]['aot'][aot_stack[lut]['mask']] = np.nan
+
+        # store bands for fitting rmsd
+        for bbi in range(setu['dsf_nbands_fit']):
+            aot_stack[lut]['b{}'.format(bbi+1)] = tmp[:, :, bbi].astype(int)
+            aot_stack[lut]['b{}'.format(bbi+1)][aot_stack[lut]['mask']] = -1
+
+        if setu['dsf_model_selection'] == 'min_dtau':
+            # array indices
+            aid = np.indices(aot_stack[lut]['all'].shape[0:2])
+            # abs difference between first and second band tau
+            aot_stack[lut]['dtau'] = np.abs(
+                aot_stack[lut]['all'][aid[0, :], aid[1, :], tmp[:, :, 0]] -
+                aot_stack[lut]['all'][aid[0, :], aid[1, :], tmp[:, :, 1]]
+            )
+        # remove sorted indices
+        tmp = None
+    return aot_stack
