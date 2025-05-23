@@ -27,6 +27,7 @@
 ##                2025-03-10 (QV) fix hyperspectral model selection, use setu['verbosity']
 ##                2025-04-30 (QV) added sensor noise bias correction
 ##                2025-05-16 (QV) added filtering for sensor noise bias correction
+import concurrent.futures
 import datetime
 import os
 import time
@@ -39,6 +40,7 @@ import skimage.measure
 
 import acolite as ac
 
+
 def write_surface_reflectance_outputs(gemo, outputs):
     """
     Helper to write outputs from _process_surface_reflectance_band to gemo.
@@ -49,8 +51,7 @@ def write_surface_reflectance_outputs(gemo, outputs):
 
 def _process_surface_reflectance_band(
     b, bands, datasets, data_mem, data_att, gatts, setu, luts, lutdw, rsrd, aot_sel, aot_lut, hyper, hyper_res,
-    xnew, ynew, ttot_all, segment_data, copy_rhot, sensor_lut, use_revlut, par,
-    tiles, per_pixel_geometry, output_file, rho_cirrus,
+    xnew, ynew, ttot_all, segment_data, copy_rhot, sensor_lut, use_revlut, par, rho_cirrus,
     ac_opt, gk, exp_lut=None, long_wv=None, short_wv=None, epsilon=None, rhoam=None,
     exp_fixed_epsilon=None, exp_fixed_rhoam=None, mask=None
 ):
@@ -925,6 +926,7 @@ def acolite_l2r(gem,
                 setu['dsf_spectrum_option'] = 'darkest'
 
             ## run through bands to get aot
+            # WIP Refactor in progress
             aot_bands = []
             aot_dict = {}
             dsf_rhod = {}
@@ -1724,25 +1726,56 @@ def acolite_l2r(gem,
     for ds in gem.datasets:
         gem.data(ds, store=True, return_data=False)
 
+    # for bi, b in enumerate(gem.bands):
+    #     if (ac_opt == 'dsf'):
+    #         outputs = _process_surface_reflectance_band(
+    #             b, gem.bands[b], gem.datasets, gem.data_mem, gem.data_att, gem.gatts, setu, luts, lutdw, rsrd, aot_sel, aot_lut, hyper, hyper_res,
+    #             xnew, ynew, ttot_all, segment_data, copy_rhot, sensor_lut, use_revlut, par, rho_cirrus,
+    #             ac_opt, gk
+    #             )
+    #     elif (ac_opt == 'exp'):
+    #         # WIP Untested refactor: exp option
+    #         outputs = _process_surface_reflectance_band(
+    #             b, gem.bands[b], gem.datasets, gem.data_mem, gem.data_att, gem.gatts, setu, luts, lutdw, rsrd, aot_sel, aot_lut, hyper, hyper_res,
+    #             xnew, ynew, ttot_all, segment_data, copy_rhot, sensor_lut, use_revlut, par, rho_cirrus,
+    #             ac_opt, gk, exp_lut=exp_lut, long_wv=long_wv, short_wv=short_wv, epsilon=epsilon, rhoam=rhoam,
+    #             exp_fixed_epsilon=exp_fixed_epsilon, exp_fixed_rhoam=exp_fixed_rhoam, mask=mask
+    #             )
+    #     if outputs is not None:
+    #         all_outputs.append(outputs)
+
+    # Parallelize the band processing loop using ThreadPoolExecutor
+    def _process_band_wrapper(args):
+        # Helper to unpack arguments for parallel execution
+        return _process_surface_reflectance_band(*args)
+
+    # Prepare arguments for each band
+    band_args = []
     for bi, b in enumerate(gem.bands):
-        if (ac_opt == 'dsf'):
-            outputs = _process_surface_reflectance_band(
-                b, gem.bands[b], gem.datasets, gem.data_mem, gem.data_att, gem.gatts, setu, luts, lutdw, rsrd, aot_sel, aot_lut, hyper, hyper_res,
-                xnew, ynew, ttot_all, segment_data, copy_rhot, sensor_lut, use_revlut, par,
-                tiles, per_pixel_geometry, output_file, rho_cirrus,
-                ac_opt, gk
-                )
-        elif (ac_opt == 'exp'):
-            outputs = _process_surface_reflectance_band(
-                b, gem.bands[b], gem.datasets, gem.data_mem, gem.data_att, gem.gatts, setu, luts, lutdw, rsrd, aot_sel, aot_lut, hyper, hyper_res,
-                xnew, ynew, ttot_all, segment_data, copy_rhot, sensor_lut, use_revlut, par,
-                tiles, per_pixel_geometry, output_file, rho_cirrus,
-                ac_opt, gk, exp_lut=exp_lut, long_wv=long_wv, short_wv=short_wv, epsilon=epsilon, rhoam=rhoam,
-                exp_fixed_epsilon=exp_fixed_epsilon, exp_fixed_rhoam=exp_fixed_rhoam, mask=mask
-                )
-        if outputs is not None:
-            all_outputs.append(outputs)
-    for outputs in all_outputs:
+        if ac_opt == 'dsf':
+            band_args.append((
+                b, gem.bands[b], gem.datasets, gem.data_mem, gem.data_att, gem.gatts, setu, luts, lutdw, rsrd,
+                aot_sel, aot_lut, hyper, hyper_res, xnew, ynew, ttot_all, segment_data, copy_rhot, sensor_lut,
+                use_revlut, par, rho_cirrus, ac_opt, gk
+            ))
+        elif ac_opt == 'exp':
+            # WIP Untested refactor: exp option
+            band_args.append((
+                b, gem.bands[b], gem.datasets, gem.data_mem, gem.data_att, gem.gatts, setu, luts, lutdw, rsrd,
+                aot_sel, aot_lut, hyper, hyper_res, xnew, ynew, ttot_all, segment_data, copy_rhot, sensor_lut,
+                use_revlut, par, rho_cirrus, ac_opt, gk, exp_lut, long_wv, short_wv, epsilon, rhoam,
+                exp_fixed_epsilon, exp_fixed_rhoam, mask
+            ))
+
+    all_results = []
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        results = executor.map(_process_band_wrapper, band_args)
+        for result in results:
+            if result is not None:
+                all_results.append(result)
+
+    # Write all outputs to gemo
+    for outputs in all_results:
         write_surface_reflectance_outputs(gemo, outputs)
 
     ## update outputfile dataset info
