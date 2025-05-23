@@ -353,6 +353,25 @@ def _process_surface_reflectance_band(
 
     return outputs
 
+def _should_use_band_for_dsf(b, gem, setu):
+    """
+    Helper to determine if a band should be used in DSF AOT estimation.
+    Returns (True, None) if the band should be used, otherwise (False, reason_string).
+    """
+    if str(b) in setu['dsf_exclude_bands']:
+        return False, f'Skipping band {b} ({gem.bands[b]["rhot_ds"]}) as it is in dsf_exclude_bands: {setu["dsf_exclude_bands"]}'
+    if gem.bands[b]['wave_nm'] < setu['dsf_wave_range'][0]:
+        return False, f'Skipping band {b} ({gem.bands[b]["rhot_ds"]}) as wavelength < dsf_wave_range[0]: {gem.bands[b]["wave_nm"]:.1f} < {setu["dsf_wave_range"][0]}'
+    if gem.bands[b]['wave_nm'] > setu['dsf_wave_range'][1]:
+        return False, f'Skipping band {b} ({gem.bands[b]["rhot_ds"]}) as wavelength > dsf_wave_range[1]: {gem.bands[b]["wave_nm"]:.1f} > {setu["dsf_wave_range"][1]}'
+    if gem.bands[b]['tt_gas'] < setu['min_tgas_aot']:
+        return False, f'Skipping band {b} ({gem.bands[b]["rhot_ds"]}) as tt_gas < min_tgas_aot: {gem.bands[b]["tt_gas"]:.3f} < {setu["min_tgas_aot"]:.3f}'
+    if ('rhot_ds' not in gem.bands[b]) or ('tt_gas' not in gem.bands[b]):
+        return False, f'Skipping band {b} ({gem.bands[b].get("rhot_ds", "unknown")}) as rhot_ds or tt_gas is missing from attributes'
+    if gem.bands[b]['rhot_ds'] not in gem.datasets:
+        return False, f'Skipping band {b} ({gem.bands[b]["rhot_ds"]}) as {gem.bands[b]["rhot_ds"]} not in datasets: {gem.datasets}'
+    return True, None
+
 def acolite_l2r(gem,
                 output = None,
                 sub = None,
@@ -931,33 +950,14 @@ def acolite_l2r(gem,
             aot_dict = {}
             dsf_rhod = {}
             for bi, b in enumerate(gem.bands):
-                ## test if band can or should be used in DSF
-                ## skip band if listed in dsf_exlude_bands
-                if (str(b) in setu['dsf_exclude_bands']):
-                    if setu['verbosity'] > 5: print('Skipping band {} ({}) as it is in dsf_exclude_bands: {}'.format(b, gem.bands[b]['rhot_ds'], setu['dsf_exclude_bands']))
+                use_band, reason = _should_use_band_for_dsf(b, gem, setu)
+                if not use_band:
+                    if setu['verbosity'] > 5 and reason:
+                        print(reason)
                     continue
-                ## skip bands according to configuration
-                if (gem.bands[b]['wave_nm'] < setu['dsf_wave_range'][0]):
-                    if setu['verbosity'] > 5: print('Skipping band {} ({}) as wavelength < dsf_wave_range[0]: {:.1f} < {}'.format(b, gem.bands[b]['rhot_ds'], gem.bands[b]['wave_nm'], setu['dsf_wave_range'][0]))
-                    continue
-                if (gem.bands[b]['wave_nm'] > setu['dsf_wave_range'][1]):
-                    if setu['verbosity'] > 5: print('Skipping band {} ({}) as wavelength > dsf_wave_range[1]: {:.1f} > {}'.format(b, gem.bands[b]['rhot_ds'], gem.bands[b]['wave_nm'], setu['dsf_wave_range'][1]))
-                    continue
-                ## skip band for aot computation
-                if gem.bands[b]['tt_gas'] < setu['min_tgas_aot']:
-                    if setu['verbosity'] > 5: print('Skipping band {} ({}) as tt_gas < min_tgas_aot: {:.3f} < {:.3f}'.format(b, gem.bands[b]['rhot_ds'], gem.bands[b]['tt_gas'],setu['min_tgas_aot']))
-                    continue
-                ## skip band if either rhot_ds or tt_gas are missing from attributes
-                if ('rhot_ds' not in gem.bands[b]) or ('tt_gas' not in gem.bands[b]):
-                    if setu['verbosity'] > 5: print('Skipping band {} ({}) as rhot_ds or tt_gas is missing from attributes'.format(b, gem.bands[b]['rhot_ds']))
-                    continue
-                ## skip band if rhot data not in datasets
-                if gem.bands[b]['rhot_ds'] not in gem.datasets:
-                    if setu['verbosity'] > 5: print('Skipping band {} ({}) as {} not in datasets: {}'.format(b, gem.bands[b]['rhot_ds'], gem.bands[b]['rhot_ds'], gem.datasets))
-                    continue
-                ## end test if band can or should be used in DSF
 
-                if setu['verbosity'] > 1: print('Running AOT estimation for band {} ({})'.format(b, gem.bands[b]['rhot_ds']))
+                if setu['verbosity'] > 1:
+                    print('Running AOT estimation for band {} ({})'.format(b, gem.bands[b]['rhot_ds']))
 
                 ## extract data
                 band_data = gem.data(gem.bands[b]['rhot_ds'])*1.0
@@ -965,37 +965,7 @@ def acolite_l2r(gem,
 
                 ## resample to reduce staircase effect
                 ## apply filter for SNBC
-                if (setu['sensor_noise_bias_correction']) & ('sensor_noise' in gem.bands[b]):
-                    if 'sensor_noise_bias_correction_resampling' in setu:
-                        if setu['sensor_noise_bias_correction_resampling'] is None:
-                            n_noise = 1
-                        else:
-                            n_noise = int(setu['sensor_noise_bias_correction_resampling'])
-                            if n_noise < 1:
-                                n_noise = 1
-                                print('Setting sensor_noise_bias_correction_resampling={}'.format(n_noise))
-                            else:
-                                print('Using sensor_noise_bias_correction_resampling={}'.format(n_noise))
-                    else:
-                        n_noise = 1
-
-                    ## do resampling if n_noise > 1
-                    if n_noise > 1:
-                        d_ = band_data * 1.0
-                        ## subset to number of pixels divisible by n_noise
-                        m1 = d_.shape[0] - (d_.shape[0] % n_noise)
-                        m2 = d_.shape[1] - (d_.shape[1] % n_noise)
-                        d_ = d_[0:m1, 0:m2]
-
-                        ## resampled size
-                        n1 = int(d_.shape[0] / n_noise)
-                        n2 = int(d_.shape[1] / n_noise)
-                        d_2 = d_.reshape(n_noise, n_noise, n1, n2)
-
-                        ## compute average over nxn pixels
-                        d_mean = d_2.mean(axis = (0,1))
-                        band_data = d_mean * 1.0
-                ## end apply filter for SNBC
+                band_data, n_noise = _apply_sensor_noise_bias_correction(band_data, gem, b, setu)
 
                 ## compute mask
                 valid = np.isfinite(band_data)*(band_data>0)
@@ -2184,3 +2154,41 @@ def acolite_l2r(gem,
     else:
 
         return(ofile, setu)
+
+def _apply_sensor_noise_bias_correction(band_data, gem, b, setu):
+    """
+    Applies sensor noise bias correction and optional resampling to band_data.
+    Returns the corrected band_data and n_noise used.
+    """
+    n_noise = 1
+    if (setu['sensor_noise_bias_correction']) & ('sensor_noise' in gem.bands[b]):
+        if 'sensor_noise_bias_correction_resampling' in setu:
+            if setu['sensor_noise_bias_correction_resampling'] is None:
+                n_noise = 1
+            else:
+                n_noise = int(setu['sensor_noise_bias_correction_resampling'])
+                if n_noise < 1:
+                    n_noise = 1
+                    print('Setting sensor_noise_bias_correction_resampling={}'.format(n_noise))
+                else:
+                    print('Using sensor_noise_bias_correction_resampling={}'.format(n_noise))
+        else:
+            n_noise = 1
+
+        # do resampling if n_noise > 1
+        if n_noise > 1:
+            d_ = band_data * 1.0
+            # subset to number of pixels divisible by n_noise
+            m1 = d_.shape[0] - (d_.shape[0] % n_noise)
+            m2 = d_.shape[1] - (d_.shape[1] % n_noise)
+            d_ = d_[0:m1, 0:m2]
+
+            # resampled size
+            n1 = int(d_.shape[0] / n_noise)
+            n2 = int(d_.shape[1] / n_noise)
+            d_2 = d_.reshape(n_noise, n_noise, n1, n2)
+
+            # compute average over nxn pixels
+            d_mean = d_2.mean(axis = (0,1))
+            band_data = d_mean * 1.0
+    return band_data, n_noise
