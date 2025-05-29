@@ -353,23 +353,23 @@ def _process_surface_reflectance_band(
 
     return outputs
 
-def _should_use_band_for_dsf(b, gem, setu):
+def _should_use_band_for_dsf(b, gem_bands_b, gem_datasets, setu):
     """
     Helper to determine if a band should be used in DSF AOT estimation.
     Returns (True, None) if the band should be used, otherwise (False, reason_string).
     """
     if str(b) in setu['dsf_exclude_bands']:
-        return False, f'Skipping band {b} ({gem.bands[b]["rhot_ds"]}) as it is in dsf_exclude_bands: {setu["dsf_exclude_bands"]}'
-    if gem.bands[b]['wave_nm'] < setu['dsf_wave_range'][0]:
-        return False, f'Skipping band {b} ({gem.bands[b]["rhot_ds"]}) as wavelength < dsf_wave_range[0]: {gem.bands[b]["wave_nm"]:.1f} < {setu["dsf_wave_range"][0]}'
-    if gem.bands[b]['wave_nm'] > setu['dsf_wave_range'][1]:
-        return False, f'Skipping band {b} ({gem.bands[b]["rhot_ds"]}) as wavelength > dsf_wave_range[1]: {gem.bands[b]["wave_nm"]:.1f} > {setu["dsf_wave_range"][1]}'
-    if gem.bands[b]['tt_gas'] < setu['min_tgas_aot']:
-        return False, f'Skipping band {b} ({gem.bands[b]["rhot_ds"]}) as tt_gas < min_tgas_aot: {gem.bands[b]["tt_gas"]:.3f} < {setu["min_tgas_aot"]:.3f}'
-    if ('rhot_ds' not in gem.bands[b]) or ('tt_gas' not in gem.bands[b]):
-        return False, f'Skipping band {b} ({gem.bands[b].get("rhot_ds", "unknown")}) as rhot_ds or tt_gas is missing from attributes'
-    if gem.bands[b]['rhot_ds'] not in gem.datasets:
-        return False, f'Skipping band {b} ({gem.bands[b]["rhot_ds"]}) as {gem.bands[b]["rhot_ds"]} not in datasets: {gem.datasets}'
+        return False, f'Skipping band {b} ({gem_bands_b["rhot_ds"]}) as it is in dsf_exclude_bands: {setu["dsf_exclude_bands"]}'
+    if gem_bands_b['wave_nm'] < setu['dsf_wave_range'][0]:
+        return False, f'Skipping band {b} ({gem_bands_b["rhot_ds"]}) as wavelength < dsf_wave_range[0]: {gem_bands_b["wave_nm"]:.1f} < {setu["dsf_wave_range"][0]}'
+    if gem_bands_b['wave_nm'] > setu['dsf_wave_range'][1]:
+        return False, f'Skipping band {b} ({gem_bands_b["rhot_ds"]}) as wavelength > dsf_wave_range[1]: {gem_bands_b["wave_nm"]:.1f} > {setu["dsf_wave_range"][1]}'
+    if gem_bands_b['tt_gas'] < setu['min_tgas_aot']:
+        return False, f'Skipping band {b} ({gem_bands_b["rhot_ds"]}) as tt_gas < min_tgas_aot: {gem_bands_b["tt_gas"]:.3f} < {setu["min_tgas_aot"]:.3f}'
+    if ('rhot_ds' not in gem_bands_b) or ('tt_gas' not in gem_bands_b):
+        return False, f'Skipping band {b} ({gem_bands_b.get("rhot_ds", "unknown")}) as rhot_ds or tt_gas is missing from attributes'
+    if gem_bands_b['rhot_ds'] not in gem_datasets:
+        return False, f'Skipping band {b} ({gem_bands_b["rhot_ds"]}) as {gem_bands_b["rhot_ds"]} not in datasets: {gem_datasets}'
     return True, None
 
 def acolite_l2r(gem,
@@ -945,96 +945,67 @@ def acolite_l2r(gem,
                 setu['dsf_spectrum_option'] = 'darkest'
 
             ## run through bands to get aot
+            # Ensure all gem data in memory (gem.data_mem)
+            for ds in gem.datasets:
+                gem.data(ds, store=True, return_data=False)
+
             # WIP Refactor in progress
+            # aot_bands = []
+            # aot_dict = {}
+            # dsf_rhod = {}
+            # for bi, b in enumerate(gem.bands):
+            #     result = _process_dsf_band(b, gem.bands[b], gem.datasets, gem.data_mem, gem.gatts, setu, luts, lutdw, revl, use_revlut, hyper, par, rsrd, left, right, tiles, segment_data)
+            #     if result is None:
+            #         continue
+            #     aot_band, b, dsf_rhod_b, gk = result
+
+            #     ## store current band results
+            #     aot_dict[b] = aot_band
+            #     aot_bands.append(b)
+            #     if dsf_rhod_b is not None:
+            #         dsf_rhod[b] = dsf_rhod_b
+
+            # Parallelize the per-band DSF processing loop
             aot_bands = []
             aot_dict = {}
             dsf_rhod = {}
-            for bi, b in enumerate(gem.bands):
-                use_band, reason = _should_use_band_for_dsf(b, gem, setu)
-                if not use_band:
-                    if setu['verbosity'] > 5 and reason:
-                        print(reason)
-                    continue
 
-                if setu['verbosity'] > 1:
-                    print('Running AOT estimation for band {} ({})'.format(b, gem.bands[b]['rhot_ds']))
+            def _process_dsf_band_wrapper(args):
+                return _process_dsf_band(*args)
 
-                ## extract data
-                band_data = gem.data(gem.bands[b]['rhot_ds'])*1.0
-                band_shape = band_data.shape
-
-                ## resample to reduce staircase effect
-                ## apply filter for SNBC
-                band_data, n_noise = _apply_sensor_noise_bias_correction(band_data, gem, b, setu)
-
-                ## compute mask
-                valid = np.isfinite(band_data)*(band_data>0)
-                mask = valid == False
-
-                ## apply TOA filter
-                if setu['dsf_filter_rhot']:
-                    if setu['verbosity'] > 1: print('Filtered {} using {}th percentile in {}x{} pixel box'.format(gem.bands[b]['rhot_ds'],
-                                                    setu['dsf_filter_percentile'], setu['dsf_filter_box'][0], setu['dsf_filter_box'][1]))
-                    band_data[mask] = np.nanmedian(band_data) ## fill mask with median
-                    #band_data = scipy.ndimage.median_filter(band_data, size=setu['dsf_filter_box'])
-                    band_data = scipy.ndimage.percentile_filter(band_data, setu['dsf_filter_percentile'], size=setu['dsf_filter_box'])
-                    band_data[mask] = np.nan
-                band_sub = np.where(valid)
-                del valid, mask
-
-                ## geometry key '' if using resolved, otherwise '_mean' or '_tiled'
-                gk = ''
-
-                ## fixed path reflectance
-                if setu['dsf_aot_estimate'] == 'fixed':
-                    band_data, gk, dark_pixel_location = _dsf_fixed_path_reflectance(band_data, band_sub, setu, ac, b)
-                elif setu['dsf_aot_estimate'] == 'tiled':
-                    ## tiled path reflectance
-                    band_data, gk = _dsf_tiled_path_reflectance(band_data, tiles, setu, ac)
-                elif setu['dsf_aot_estimate'] == 'segmented':
-                    ## image is segmented based on input vector mask
-                    band_data, gk = _dsf_segmented_path_reflectance(band_data, segment_data, setu, ac)
-                ## resolved per pixel dsf
-                elif setu['dsf_aot_estimate'] == 'resolved':
-                    if not setu['resolved_geometry']: gk = '_mean'
-                else:
-                    print('DSF option {} not configured'.format(setu['dsf_aot_estimate']))
-                    continue
-                del band_sub
-
-                band_sub = np.where(np.isfinite(band_data))
-                if len(band_sub[0]) == 0:
-                    print('No valid TOA data for band {}'.format(b))
-                    continue
-
-                ## do noise bias correction
-                if (setu['sensor_noise_bias_correction']) & ('sensor_noise' in gem.bands[b]):
-                    band_data = _apply_noise_bias_correction(band_data, gem, b, setu, n_noise, gk, band_sub)
-
-                ## do gas correction
-                band_data[band_sub] /= gem.bands[b]['tt_gas']
-
-                ## store rhod
-                if setu['dsf_aot_estimate'] in ['fixed', 'tiled', 'segmented']:
-                    dsf_rhod[b] = band_data
-
-                ## use band specific geometry if available
-                gk_raa = '{}'.format(gk)
-                gk_vza = '{}'.format(gk)
-                if 'raa_{}'.format(gem.bands[b]['wave_name']) in gem.datasets:
-                    gk_raa = '_{}'.format(gem.bands[b]['wave_name'])+gk_raa
-                if 'vza_{}'.format(gem.bands[b]['wave_name']) in gem.datasets:
-                    gk_vza = '_{}'.format(gem.bands[b]['wave_name'])+gk_vza
-
-                ## compute aot
-                aot_band = _compute_aot_band(
-                    band_data, band_sub, gk, gk_raa, gk_vza, luts, lutdw, revl, use_revlut, hyper, setu, gem, b, par, rsrd, left, right
+            band_args = [
+                (
+                    b,
+                    gem.bands[b],
+                    gem.datasets,
+                    gem.data_mem,
+                    gem.gatts,
+                    setu,
+                    luts,
+                    lutdw,
+                    revl,
+                    use_revlut,
+                    hyper,
+                    par,
+                    rsrd,
+                    left,
+                    right,
+                    tiles,
+                    segment_data
                 )
+                for b in gem.bands
+            ]
 
-                ## store current band results
-                aot_dict[b] = aot_band
-                aot_bands.append(b)
-                del band_data, band_sub, aot_band
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                results = executor.map(_process_dsf_band_wrapper, band_args)
+                for result in results:
+                    if result is None:
+                        continue
+                    aot_band, b, dsf_rhod_b, gk = result
+                    aot_dict[b] = aot_band
+                    aot_bands.append(b)
+                    if dsf_rhod_b is not None:
+                        dsf_rhod[b] = dsf_rhod_b
 
             ## test if valid data could be extracted
             if len(aot_bands) == 0:
@@ -1456,24 +1427,6 @@ def acolite_l2r(gem,
     # Ensure all gem data in memory (gem.data_mem)
     for ds in gem.datasets:
         gem.data(ds, store=True, return_data=False)
-
-    # for bi, b in enumerate(gem.bands):
-    #     if (ac_opt == 'dsf'):
-    #         outputs = _process_surface_reflectance_band(
-    #             b, gem.bands[b], gem.datasets, gem.data_mem, gem.data_att, gem.gatts, setu, luts, lutdw, rsrd, aot_sel, aot_lut, hyper, hyper_res,
-    #             xnew, ynew, ttot_all, segment_data, copy_rhot, sensor_lut, use_revlut, par, rho_cirrus,
-    #             ac_opt, gk
-    #             )
-    #     elif (ac_opt == 'exp'):
-    #         # WIP Untested refactor: exp option
-    #         outputs = _process_surface_reflectance_band(
-    #             b, gem.bands[b], gem.datasets, gem.data_mem, gem.data_att, gem.gatts, setu, luts, lutdw, rsrd, aot_sel, aot_lut, hyper, hyper_res,
-    #             xnew, ynew, ttot_all, segment_data, copy_rhot, sensor_lut, use_revlut, par, rho_cirrus,
-    #             ac_opt, gk, exp_lut=exp_lut, long_wv=long_wv, short_wv=short_wv, epsilon=epsilon, rhoam=rhoam,
-    #             exp_fixed_epsilon=exp_fixed_epsilon, exp_fixed_rhoam=exp_fixed_rhoam, mask=mask
-    #             )
-    #     if outputs is not None:
-    #         all_outputs.append(outputs)
 
     # Parallelize the band processing loop using ThreadPoolExecutor
     def _process_band_wrapper(args):
@@ -1916,13 +1869,13 @@ def acolite_l2r(gem,
 
         return(ofile, setu)
 
-def _apply_sensor_noise_bias_correction(band_data, gem, b, setu):
+def _apply_sensor_noise_bias_correction(band_data, gem_bands_b, setu):
     """
     Applies sensor noise bias correction and optional resampling to band_data.
     Returns the corrected band_data and n_noise used.
     """
     n_noise = 1
-    if (setu['sensor_noise_bias_correction']) & ('sensor_noise' in gem.bands[b]):
+    if (setu['sensor_noise_bias_correction']) & ('sensor_noise' in gem_bands_b):
         if 'sensor_noise_bias_correction_resampling' in setu:
             if setu['sensor_noise_bias_correction_resampling'] is None:
                 n_noise = 1
@@ -2021,17 +1974,17 @@ def _dsf_segmented_path_reflectance(band_data, segment_data, setu, ac):
     return band_data, gk
 
 def _apply_noise_bias_correction(
-    band_data, gem, b, setu, n_noise, gk, band_sub
+    band_data, gem_bands_b, gem_data_mem, b, setu, n_noise, gk, band_sub
 ):
     """
     Applies the sensor noise bias correction with sigma factor to band_data.
     Modifies band_data in-place and returns it.
     """
-    if gem.bands[b]['sensor_noise'] > 0:
+    if gem_bands_b['sensor_noise'] > 0:
         if setu['sensor_noise_bias_correction_sigma_factor'] is not None:
             print('Performing sensor noise bias correction for band {} with {} x {}'.format(
-                b, setu['sensor_noise_bias_correction_sigma_factor'], gem.bands[b]['sensor_noise']))
-            noise_offset = gem.bands[b]['sensor_noise'] * setu['sensor_noise_bias_correction_sigma_factor']
+                b, setu['sensor_noise_bias_correction_sigma_factor'], gem_bands_b['sensor_noise']))
+            noise_offset = gem_bands_b['sensor_noise'] * setu['sensor_noise_bias_correction_sigma_factor']
         else:
             if setu['dsf_spectrum_option'] == 'percentile':
                 zf = scipy.stats.norm.ppf(1-(setu['dsf_percentile'])/100)
@@ -2040,15 +1993,15 @@ def _apply_noise_bias_correction(
                 zf = 2
                 print('Warning: Use of sensor_noise_bias_correction without sigma factor is recommended for dsf_spectrum_option=percentile')
                 print('Warning: Using default sigma factor = {:.3f}'.format(zf))
-            print('Performing sensor noise bias correction for band {} with {:.3f} x {}'.format(b, zf, gem.bands[b]['sensor_noise']))
-            noise_offset = gem.bands[b]['sensor_noise'] * zf
+            print('Performing sensor noise bias correction for band {} with {:.3f} x {}'.format(b, zf, gem_bands_b['sensor_noise']))
+            noise_offset = gem_bands_b['sensor_noise'] * zf
 
         # reduce noise offset by 1/n
         noise_offset *= 1/n_noise
         print('Performing sensor noise bias correction with noise reduction of 1/{}'.format(n_noise))
 
         if setu['sensor_noise_bias_correction_sun_zenith']:
-            szaf = np.cos(np.radians(gem.data_mem['sza'+gk][band_sub]))
+            szaf = np.cos(np.radians(gem_data_mem['sza'+gk][band_sub]))
             print('Performing sensor noise bias correction with sun zenith angle factor applied (mean = {:.3f})'.format(1/np.nanmean(szaf)))
             band_data += noise_offset / szaf
             del szaf
@@ -2057,7 +2010,7 @@ def _apply_noise_bias_correction(
     return band_data
 
 def _compute_aot_band(
-    band_data, band_sub, gk, gk_raa, gk_vza, luts, lutdw, revl, use_revlut, hyper, setu, gem, b, par, rsrd, left, right
+    band_data, band_sub, gk, gk_raa, gk_vza, luts, lutdw, revl, use_revlut, hyper, setu, gem_gatts, gem_data_mem, b, par, rsrd, left, right
 ):
     """
     Compute aot_band for a single band.
@@ -2073,19 +2026,19 @@ def _compute_aot_band(
         if use_revlut:
             if len(revl[lut]['rgi'][b].grid) == 5:
                 aot_band[lut][band_sub] = revl[lut]['rgi'][b]((
-                    gem.data_mem['pressure'+gk][band_sub],
-                    gem.data_mem['raa'+gk_raa][band_sub],
-                    gem.data_mem['vza'+gk_vza][band_sub],
-                    gem.data_mem['sza'+gk][band_sub],
+                    gem_data_mem['pressure'+gk][band_sub],
+                    gem_data_mem['raa'+gk_raa][band_sub],
+                    gem_data_mem['vza'+gk_vza][band_sub],
+                    gem_data_mem['sza'+gk][band_sub],
                     band_data[band_sub]
                 ))
             else:
                 aot_band[lut][band_sub] = revl[lut]['rgi'][b]((
-                    gem.data_mem['pressure'+gk][band_sub],
-                    gem.data_mem['raa'+gk_raa][band_sub],
-                    gem.data_mem['vza'+gk_vza][band_sub],
-                    gem.data_mem['sza'+gk][band_sub],
-                    gem.data_mem['wind'+gk][band_sub],
+                    gem_data_mem['pressure'+gk][band_sub],
+                    gem_data_mem['raa'+gk_raa][band_sub],
+                    gem_data_mem['vza'+gk_vza][band_sub],
+                    gem_data_mem['sza'+gk][band_sub],
+                    gem_data_mem['wind'+gk][band_sub],
                     band_data[band_sub]
                 ))
             # mask out of range aot
@@ -2105,19 +2058,19 @@ def _compute_aot_band(
                     rhot_aot = np.zeros((
                         len(lutdw[lut]['meta']['tau']),
                         len(lutdw[lut]['meta']['wave']),
-                        len(gem.data_mem['pressure'+gk].flatten())
+                        len(gem_data_mem['pressure'+gk].flatten())
                     ))
                     # compute rhot for range of aot
                     for ai, aot in enumerate(lutdw[lut]['meta']['tau']):
                         for pi in range(rhot_aot.shape[2]):
                             tmp = lutdw[lut]['rgi']((
-                                gem.data_mem['pressure'+gk].flatten()[pi],
+                                gem_data_mem['pressure'+gk].flatten()[pi],
                                 lutdw[lut]['ipd'][par],
                                 lutdw[lut]['meta']['wave'],
-                                gem.data_mem['raa'+gk_raa].flatten()[pi],
-                                gem.data_mem['vza'+gk_vza].flatten()[pi],
-                                gem.data_mem['sza'+gk].flatten()[pi],
-                                gem.data_mem['wind'+gk].flatten()[pi], aot
+                                gem_data_mem['raa'+gk_raa].flatten()[pi],
+                                gem_data_mem['vza'+gk_vza].flatten()[pi],
+                                gem_data_mem['sza'+gk].flatten()[pi],
+                                gem_data_mem['wind'+gk].flatten()[pi], aot
                             ))
                             rhot_aot[ai, :, pi] = tmp.flatten()
                     if setu['verbosity'] > 4:
@@ -2137,15 +2090,15 @@ def _compute_aot_band(
                     print('Computed aot: {}'.format(aotret))
                 aot_band[lut][band_sub] = aotret.reshape(aot_band[lut][band_sub].shape)
             else:
-                if len(gem.data_mem['pressure'+gk]) > 1:
-                    for gki in range(len(gem.data_mem['pressure'+gk])):
+                if len(gem_data_mem['pressure'+gk]) > 1:
+                    for gki in range(len(gem_data_mem['pressure'+gk])):
                         tmp = lutdw[lut]['rgi'][b]((
-                            gem.data_mem['pressure'+gk][gki],
+                            gem_data_mem['pressure'+gk][gki],
                             lutdw[lut]['ipd'][par],
-                            gem.data_mem['raa'+gk_raa][gki],
-                            gem.data_mem['vza'+gk_vza][gki],
-                            gem.data_mem['sza'+gk][gki],
-                            gem.data_mem['wind'+gk][gki], lutdw[lut]['meta']['tau']
+                            gem_data_mem['raa'+gk_raa][gki],
+                            gem_data_mem['vza'+gk_vza][gki],
+                            gem_data_mem['sza'+gk][gki],
+                            gem_data_mem['wind'+gk][gki], lutdw[lut]['meta']['tau']
                         ))
                         tmp = tmp.flatten()
                         aot_band[lut][gki] = np.interp(
@@ -2153,12 +2106,12 @@ def _compute_aot_band(
                         )
                 else:
                     tmp = lutdw[lut]['rgi'][b]((
-                        gem.data_mem['pressure'+gk],
+                        gem_data_mem['pressure'+gk],
                         lutdw[lut]['ipd'][par],
-                        gem.data_mem['raa'+gk_raa],
-                        gem.data_mem['vza'+gk_vza],
-                        gem.data_mem['sza'+gk],
-                        gem.data_mem['wind'+gk], lutdw[lut]['meta']['tau']
+                        gem_data_mem['raa'+gk_raa],
+                        gem_data_mem['vza'+gk_vza],
+                        gem_data_mem['sza'+gk],
+                        gem_data_mem['wind'+gk], lutdw[lut]['meta']['tau']
                     ))
                     tmp = tmp.flatten()
                     aot_band[lut][band_sub] = np.interp(
@@ -2173,7 +2126,7 @@ def _compute_aot_band(
         tel = time.time() - t0
         if setu['verbosity'] > 1:
             print('{}/B{} {} took {:.3f}s ({})'.format(
-                gem.gatts['sensor'], b, lut, tel, 'RevLUT' if use_revlut else 'StdLUT'
+                gem_gatts['sensor'], b, lut, tel, 'RevLUT' if use_revlut else 'StdLUT'
             ))
     return aot_band
 
@@ -2273,3 +2226,97 @@ def _compute_aot_stack(aot_bands, aot_dict, luts, setu):
         # remove sorted indices
         tmp = None
     return aot_stack
+
+def _process_dsf_band(
+    b, gem_bands_b, gem_datasets, gem_data_mem, gem_gatts, setu, luts, lutdw, revl, use_revlut, hyper, par, rsrd, left, right, tiles, segment_data
+):
+    """
+    Process a single band for DSF AOT estimation.
+    Returns (aot_band, gk, gk_raa, gk_vza, dsf_rhod) or None if band is skipped.
+    """
+    use_band, reason = _should_use_band_for_dsf(b, gem_bands_b, gem_datasets, setu)
+    if not use_band:
+        if setu['verbosity'] > 5 and reason:
+            print(reason)
+        return None
+
+    if setu['verbosity'] > 1:
+        print('Running AOT estimation for band {} ({})'.format(b, gem_bands_b['rhot_ds']))
+
+    # extract data
+    band_data = gem_data_mem[gem_bands_b['rhot_ds']] * 1.0
+    band_shape = band_data.shape
+
+    # resample to reduce staircase effect, apply filter for SNBC
+    band_data, n_noise = _apply_sensor_noise_bias_correction(band_data, gem_bands_b, setu)
+
+    # compute mask
+    valid = np.isfinite(band_data) * (band_data > 0)
+    mask = valid == False
+
+    # apply TOA filter
+    if setu['dsf_filter_rhot']:
+        if setu['verbosity'] > 1:
+            print('Filtered {} using {}th percentile in {}x{} pixel box'.format(
+                gem_bands_b['rhot_ds'],
+                setu['dsf_filter_percentile'],
+                setu['dsf_filter_box'][0],
+                setu['dsf_filter_box'][1]
+            ))
+        band_data[mask] = np.nanmedian(band_data)
+        band_data = scipy.ndimage.percentile_filter(
+            band_data, setu['dsf_filter_percentile'], size=setu['dsf_filter_box']
+        )
+        band_data[mask] = np.nan
+    band_sub = np.where(valid)
+    del valid, mask
+
+    # geometry key '' if using resolved, otherwise '_mean' or '_tiled'
+    gk = ''
+
+    # fixed path reflectance
+    if setu['dsf_aot_estimate'] == 'fixed':
+        band_data, gk, dark_pixel_location = _dsf_fixed_path_reflectance(band_data, band_sub, setu, ac, b)
+    elif setu['dsf_aot_estimate'] == 'tiled':
+        band_data, gk = _dsf_tiled_path_reflectance(band_data, tiles, setu, ac)
+    elif setu['dsf_aot_estimate'] == 'segmented':
+        band_data, gk = _dsf_segmented_path_reflectance(band_data, segment_data, setu, ac)
+    elif setu['dsf_aot_estimate'] == 'resolved':
+        if not setu['resolved_geometry']:
+            gk = '_mean'
+    else:
+        print('DSF option {} not configured'.format(setu['dsf_aot_estimate']))
+        return None
+    del band_sub
+
+    band_sub = np.where(np.isfinite(band_data))
+    if len(band_sub[0]) == 0:
+        print('No valid TOA data for band {}'.format(b))
+        return None
+
+    # do noise bias correction
+    if (setu['sensor_noise_bias_correction']) & ('sensor_noise' in gem_bands_b):
+        band_data = _apply_noise_bias_correction(band_data, gem_bands_b, gem_data_mem, b, setu, n_noise, gk, band_sub)
+
+    # do gas correction
+    band_data[band_sub] /= gem_bands_b['tt_gas']
+
+    # store rhod if needed
+    dsf_rhod = None
+    if setu['dsf_aot_estimate'] in ['fixed', 'tiled', 'segmented']:
+        dsf_rhod = band_data
+
+    # use band specific geometry if available
+    gk_raa = '{}'.format(gk)
+    gk_vza = '{}'.format(gk)
+    if 'raa_{}'.format(gem_bands_b['wave_name']) in gem_datasets:
+        gk_raa = '_{}'.format(gem_bands_b['wave_name']) + gk_raa
+    if 'vza_{}'.format(gem_bands_b['wave_name']) in gem_datasets:
+        gk_vza = '_{}'.format(gem_bands_b['wave_name']) + gk_vza
+
+    # compute aot
+    aot_band = _compute_aot_band(
+        band_data, band_sub, gk, gk_raa, gk_vza, luts, lutdw, revl, use_revlut, hyper, setu, gem_gatts, gem_data_mem, b, par, rsrd, left, right
+    )
+
+    return aot_band, b, dsf_rhod, gk
