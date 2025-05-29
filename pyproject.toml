@@ -10,7 +10,7 @@ dependencies = [
     "scipy",
     "numpy",
     "pyhdf",
-    "gdal==3.8.4",
+    "gdal==3.9.2",
     "netcdf4",
     "h5py",
     "pygrib",
@@ -27,3 +27,6 @@ test = [
     "pytest>=8.3.5",
     "xarray>=2025.4.0",
 ]
+
+[tool.uv]
+no-binary-package = ["gdal"]
