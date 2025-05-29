@@ -61,4 +61,4 @@ __pycache__/
 .DS_Store
 
 .vscode/
-.venv/
+tests/data/acolite_run_*l2r_settings.txt
