@@ -1,0 +1,39 @@
+{
+	"name": "acolite-mp-dev",
+  // "build": { "dockerfile": "Dockerfile" },
+	// "image": "444488357543.dkr.ecr.ap-southeast-2.amazonaws.com/easi-workflows-base:test",
+	"dockerComposeFile": ["../docker-compose.yaml", "docker-compose.extend.yaml"],
+	"service": "acolite-mp-dev",
+	"shutdownAction": "stopCompose",
+	"workspaceFolder": "/home/vscode/acolite-mp",
+	"remoteUser": "vscode",
+//   "mounts": [
+//     "source=~/.aws,target=/home/vscode/.aws,type=bind,consistency=cached",
+// 		"source=~/.easi-workflows-auth.conf,target=/home/vscode/.easi-workflows-auth.conf,type=bind,consistency=cached"
+// ],
+"customizations": {
+	"vscode": {
+		"extensions": [
+			"moshfeu.compare-folders",
+			"twxs.cmake",
+			"mhutchie.git-graph",
+			"ms-python.isort",
+			"ephoton.indent-switcher",
+			"oderwat.indent-rainbow",
+			"ms-python.python",
+			"ms-python.vscode-pylance",
+			"Gruntfuggly.todo-tree",
+			"ms-toolsai.jupyter",
+			"svipas.prettier-plus",
+			"ms-python.black-formatter",
+			"amazonwebservices.aws-toolkit-vscode",
+			"github.copilot",
+			"emeryberger.scalene",
+			"ritwickdey.liveserver"
+		]
+	}
+}
+//,
+// "initializeCommand": "aws sso login --profile 444488357543_EASI_CSIRO_PROD_PowerUserAccess && (aws ecr get-login-password --region ap-southeast-2 --profile 444488357543_EASI_CSIRO_PROD_PowerUserAccess | docker login --username AWS --password-stdin 444488357543.dkr.ecr.ap-southeast-2.amazonaws.com)"
+
+}

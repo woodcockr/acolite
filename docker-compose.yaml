@@ -1,0 +1,9 @@
+# Default compose will create an ows image, with dev settings and connect to a local db
+services:
+  acolite-mp-dev:
+    build: docker
+    user: vscode
+    volumes:
+      - ~/.aws:/home/vscode/.aws
+      - ~/dev/devcontainers/data:/data
+    restart: no
