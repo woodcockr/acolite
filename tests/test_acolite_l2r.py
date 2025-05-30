@@ -60,7 +60,7 @@ def test_acolite_l2r_runs(gem, original_dataset_filename, csiro_settings_ls9):
         stats = pstats.Stats(profiler)
         stats.dump_stats(f'{temp_dir}/profiler_stats_file.dat')
         stats.strip_dirs()
-        stats.print_stats(5).sort_stats('cumtime')
+        stats.print_stats(5).sort_stats('tottime')
 
         # Check if the result is as expected
         assert result is not None, "Acolite L2R module did not return a result."
