@@ -372,6 +372,36 @@ def _should_use_band_for_dsf(b, gem_bands_b, gem_datasets, setu):
         return False, f'Skipping band {b} ({gem_bands_b["rhot_ds"]}) as {gem_bands_b["rhot_ds"]} not in datasets: {gem_datasets}'
     return True, None
 
+def _compute_glint_reference_band_transmittance(setu, cur_data, ttot, xnew, ynew, data_dimensions, segment_data, muv, mus, sub_gc):
+    """
+    Compute reference band transmittance for glint correction.
+    Returns wave_key, T_cur_sub
+    """
+    ## two way direct transmittance
+    if setu['dsf_aot_estimate'] == 'tiled':
+        if setu['slicing']:
+            ## load rhos dataset
+            valid_mask = np.isfinite(cur_data)
+            del cur_data
+        ttot_all_b = ac.shared.tiles_interp(ttot, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
+        target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
+    elif setu['dsf_aot_estimate'] == 'segmented':
+        ttot_all_ = ttot * 1.0
+        ttot_all_b = np.zeros(data_dimensions) + np.nan
+        for sidx, segment in enumerate(segment_data):
+            ttot_all_b[segment_data[segment]['sub']] = ttot_all_[sidx]
+        del ttot_all_
+    else:
+        ttot_all_b = ttot * 1.0
+
+    T_cur  = np.exp(-1.*(ttot_all_b/muv)) * np.exp(-1.*(ttot_all_b/mus))
+    del ttot_all_b
+
+    ## subset if 2d
+    T_cur_sub = T_cur[sub_gc] if len(np.atleast_2d(T_cur)) > 1 else T_cur[0] * 1.0
+    return T_cur_sub
+
+
 def acolite_l2r(gem,
                 output = None,
                 sub = None,
@@ -949,22 +979,6 @@ def acolite_l2r(gem,
             for ds in gem.datasets:
                 gem.data(ds, store=True, return_data=False)
 
-            # WIP Refactor in progress
-            # aot_bands = []
-            # aot_dict = {}
-            # dsf_rhod = {}
-            # for bi, b in enumerate(gem.bands):
-            #     result = _process_dsf_band(b, gem.bands[b], gem.datasets, gem.data_mem, gem.gatts, setu, luts, lutdw, revl, use_revlut, hyper, par, rsrd, left, right, tiles, segment_data)
-            #     if result is None:
-            #         continue
-            #     aot_band, b, dsf_rhod_b, gk = result
-
-            #     ## store current band results
-            #     aot_dict[b] = aot_band
-            #     aot_bands.append(b)
-            #     if dsf_rhod_b is not None:
-            #         dsf_rhod[b] = dsf_rhod_b
-
             # Parallelize the per-band DSF processing loop
             aot_bands = []
             aot_dict = {}
@@ -1516,27 +1530,7 @@ def acolite_l2r(gem,
             print('Starting glint correction')
 
             ## compute scattering angle
-            dtor = np.pi / 180.
-            sza = gem.data('sza') * dtor
-            vza = gem.data('vza') * dtor
-            raa = gem.data('raa') * dtor
-
-            ## flatten 1 element arrays
-            if sza.shape == (1,1): sza = sza.flatten()
-            if vza.shape == (1,1): vza = vza.flatten()
-            if raa.shape == (1,1): raa = raa.flatten()
-
-            muv = np.cos(vza)
-            mus = np.cos(sza)
-            cos2omega = mus*muv + np.sin(sza)*np.sin(vza)*np.cos(raa)
-            del sza, vza, raa
-
-            omega = np.arccos(cos2omega)/2
-            del cos2omega
-
-            ## read and resample refractive index
-            refri = ac.ac.refri()
-            refri_sen = ac.shared.rsr_convolute_dict(refri['wave']/1000, refri['n'], rsrd['rsr'])
+            omega, muv, mus, refri_sen = _compute_scattering_angle_and_refri(gem, rsrd)
 
             ## compute fresnel reflectance for the reference bands
             Rf_sen = {}
@@ -1555,42 +1549,64 @@ def acolite_l2r(gem,
                                   (gc_mask_data<=setu['glint_mask_rhos_threshold']))
                 del gc_mask_data
 
-                ## get reference bands transmittance
+                # Ugly hack to convert the gc_swir1 wavelength keys to the gemo.bands keys.
+                wave_band_mapping = []
                 for ib, b in enumerate(gemo.bands):
                     rhos_ds = gemo.bands[b]['rhos_ds']
                     if rhos_ds not in [gc_swir1, gc_swir2, gc_user]: continue
                     if rhos_ds not in gemo.datasets: continue
+                    wave_band_mapping.append((rhos_ds, b))
 
-                    ## two way direct transmittance
-                    if setu['dsf_aot_estimate'] == 'tiled':
-                        if setu['slicing']:
-                            ## load rhos dataset
-                            cur_data = gemo.data(rhos_ds)
-                            valid_mask = np.isfinite(cur_data)
-                            del cur_data
-                        ttot_all_b = ac.shared.tiles_interp(ttot_all[b], xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
-                        target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
-                    elif setu['dsf_aot_estimate'] == 'segmented':
-                        ttot_all_ = ttot_all[b] * 1.0
-                        ttot_all_b = np.zeros(gem.gatts['data_dimensions']) + np.nan
-                        for sidx, segment in enumerate(segment_data):
-                            ttot_all_b[segment_data[segment]['sub']] = ttot_all_[sidx]
-                        del ttot_all_
-                    else:
-                        ttot_all_b = ttot_all[b] * 1.0
+                ## get reference bands transmittance
+                # for rhos_ds, b in wave_band_mapping:
+                #     ttot = ttot_all[b]
+                #     cur_data = gemo.data(rhos_ds)
+                #     data_dimensions = gem.gatts['data_dimensions']
+                #     T_cur_sub = _compute_glint_reference_band_transmittance(setu, cur_data, ttot, xnew, ynew, data_dimensions, segment_data, muv, mus, sub_gc)
 
-                    T_cur  = np.exp(-1.*(ttot_all_b/muv)) * np.exp(-1.*(ttot_all_b/mus))
-                    del ttot_all_b
+                #     if rhos_ds == gc_user:
+                #         T_USER = T_cur_sub * 1.0
+                #     else:
+                #         if rhos_ds == gc_swir1: T_SWIR1 = T_cur_sub * 1.0
+                #         if rhos_ds == gc_swir2: T_SWIR2 = T_cur_sub * 1.0
+                #     del T_cur_sub
 
-                    ## subset if 2d
-                    T_cur_sub = T_cur[sub_gc] if len(np.atleast_2d(T_cur)) > 1 else T_cur[0] * 1.0
-
+                def _glint_band_worker(args):
+                    rhos_ds, b, gemo, setu, ttot_all, xnew, ynew, segment_data, muv, mus, sub_gc, gc_user, gc_swir1, gc_swir2, gem, data_dimensions = args
+                    ttot = ttot_all[b]
+                    cur_data = gemo.data(rhos_ds)
+                    T_cur_sub = _compute_glint_reference_band_transmittance(
+                        setu, cur_data, ttot, xnew, ynew, data_dimensions, segment_data, muv, mus, sub_gc
+                    )
+                    result = {}
                     if rhos_ds == gc_user:
-                        T_USER = T_cur_sub * 1.0
+                        result['T_USER'] = T_cur_sub * 1.0
                     else:
-                        if rhos_ds == gc_swir1: T_SWIR1 = T_cur_sub * 1.0
-                        if rhos_ds == gc_swir2: T_SWIR2 = T_cur_sub * 1.0
-                    del T_cur, T_cur_sub
+                        if rhos_ds == gc_swir1:
+                            result['T_SWIR1'] = T_cur_sub * 1.0
+                        if rhos_ds == gc_swir2:
+                            result['T_SWIR2'] = T_cur_sub * 1.0
+                    return result
+
+                T_SWIR1, T_SWIR2, T_USER = None, None, None
+                data_dimensions = gem.gatts['data_dimensions']
+                args_list = [
+                    (
+                        rhos_ds, b, gemo, setu, ttot_all, xnew, ynew, segment_data, muv, mus, sub_gc,
+                        gc_user, gc_swir1, gc_swir2, gem, data_dimensions
+                    )
+                    for rhos_ds, b in wave_band_mapping
+                ]
+
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    results = executor.map(_glint_band_worker, args_list)
+                    for result in results:
+                        if 'T_USER' in result:
+                            T_USER = result['T_USER']
+                        if 'T_SWIR1' in result:
+                            T_SWIR1 = result['T_SWIR1']
+                        if 'T_SWIR2' in result:
+                            T_SWIR2 = result['T_SWIR2']
 
                 ## swir band choice is made for first band
                 gc_choice = False
@@ -2320,3 +2336,31 @@ def _process_dsf_band(
     )
 
     return aot_band, b, dsf_rhod, gk
+
+def _compute_scattering_angle_and_refri(gem, rsrd):
+    """
+    Compute scattering angle omega and resampled refractive index for glint correction.
+    Returns (omega, muv, mus, refri_sen).
+    """
+    dtor = np.pi / 180.
+    sza = gem.data('sza') * dtor
+    vza = gem.data('vza') * dtor
+    raa = gem.data('raa') * dtor
+
+    # flatten 1 element arrays
+    if sza.shape == (1,1): sza = sza.flatten()
+    if vza.shape == (1,1): vza = vza.flatten()
+    if raa.shape == (1,1): raa = raa.flatten()
+
+    muv = np.cos(vza)
+    mus = np.cos(sza)
+    cos2omega = mus*muv + np.sin(sza)*np.sin(vza)*np.cos(raa)
+    del sza, vza, raa
+
+    omega = np.arccos(cos2omega)/2
+    del cos2omega
+
+    # read and resample refractive index
+    refri = ac.ac.refri()
+    refri_sen = ac.shared.rsr_convolute_dict(refri['wave']/1000, refri['n'], rsrd['rsr'])
+    return omega, muv, mus, refri_sen
