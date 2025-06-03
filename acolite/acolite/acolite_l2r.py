@@ -41,13 +41,20 @@ import skimage.measure
 import acolite as ac
 
 
-def write_surface_reflectance_outputs(gemo, outputs):
+def write_surface_reflectance_outputs(gemo, outputs, to_mem_only=False):
     """
     Helper to write outputs from _process_surface_reflectance_band to gemo.
     """
     for key, value in outputs.items():
         ds_name, data, ds_att = value
-        gemo.write(ds_name, data, ds_att=ds_att)
+        if to_mem_only:
+            # Store in memory only, do not write to file
+            gemo.data_mem[ds_name] = data
+            gemo.data_att[ds_name] = ds_att
+            if value not in gemo.datasets:
+                gemo.datasets.append(ds_name)
+        else:
+            gemo.write(ds_name, data, ds_att=ds_att)
 
 def _process_surface_reflectance_band(
     b, bands, datasets, data_mem, data_att, gatts, setu, luts, lutdw, rsrd, aot_sel, aot_lut, hyper, hyper_res,
@@ -1474,10 +1481,10 @@ def acolite_l2r(gem,
 
     # Write all outputs to gemo
     for outputs in all_results:
-        write_surface_reflectance_outputs(gemo, outputs)
+        write_surface_reflectance_outputs(gemo, outputs, to_mem_only=True)
 
     ## update outputfile dataset info
-    gemo.datasets_read()
+    # gemo.datasets_read()
 
     ## glint correction
     if (ac_opt == 'dsf') & (setu['dsf_residual_glint_correction']) & (setu['dsf_residual_glint_correction_method']=='default'):
@@ -1660,7 +1667,9 @@ def acolite_l2r(gem,
 
                 # Write the outputs
                 for output in outputs:
-                    write_surface_reflectance_outputs(gemo, output)
+                    write_surface_reflectance_outputs(gemo, output, to_mem_only=True)
+                for ds in gemo.datasets: # write out everything in gemo.data_mem
+                    gemo.write_ds(ds)
 
                 del sub_gc, rhog_ref
                 if gc_user is not None:

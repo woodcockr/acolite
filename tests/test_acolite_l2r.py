@@ -74,8 +74,9 @@ def test_acolite_l2r_runs(gem, original_dataset_filename, csiro_settings_ls9):
         original_noatts = original_dataset.drop_attrs(deep=True)
 
         # Check if the datasets are equal
-        for k in result_noatts.data_vars:
+        for k in original_noatts.data_vars:
             print(f"{k}, result: {result_noatts[k].equals(original_noatts[k])}")
 
-        assert result_dataset.equals(original_dataset), "Output dataset does not match the original dataset."
-        # assert result_dataset.identical(original_dataset), "Output dataset does not match the original dataset."
+        assert result_dataset.equals(original_dataset), "Output dataset does not equal the original dataset."
+
+        # assert result_dataset.identical(original_dataset), "Output dataset is not identical (incl attributes) the original dataset."
