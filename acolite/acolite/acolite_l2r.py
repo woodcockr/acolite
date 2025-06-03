@@ -51,7 +51,7 @@ def write_surface_reflectance_outputs(gemo, outputs, to_mem_only=False):
             # Store in memory only, do not write to file
             gemo.data_mem[ds_name] = data
             gemo.data_att[ds_name] = ds_att
-            if value not in gemo.datasets:
+            if ds_name not in gemo.datasets:
                 gemo.datasets.append(ds_name)
         else:
             gemo.write(ds_name, data, ds_att=ds_att)
@@ -83,7 +83,7 @@ def _process_surface_reflectance_band(
 
     # Store rhot if needed
     if copy_rhot:
-        outputs['rhot'] = (dsi, cur_data.copy(), cur_att.copy())
+        outputs['rhot'] = (dsi, cur_data, cur_att)
 
     if bands['tt_gas'] < setu['min_tgas_rho']:
         if setu['verbosity'] > 2: print('Band {} at {} nm has tgas < min_tgas_rho ({:.2f} < {:.2f})'.format(b, bands['wave_name'], bands['tt_gas'], setu['min_tgas_rho']))
@@ -230,17 +230,17 @@ def _process_surface_reflectance_band(
         if setu['dsf_write_tiled_parameters']:
             if len(np.atleast_1d(romix)>1):
                 if romix.shape == cur_data.shape:
-                    outputs['romix'] = ('romix_{}'.format(bands['wave_name']), romix.copy(), None)
+                    outputs['romix'] = ('romix_{}'.format(bands['wave_name']), romix, None)
                 else:
                     ds_att['romix'] = romix[0]
             if len(np.atleast_1d(astot)>1):
                 if astot.shape == cur_data.shape:
-                    outputs['astot'] = ('astot_{}'.format(bands['wave_name']), astot.copy(), None)
+                    outputs['astot'] = ('astot_{}'.format(bands['wave_name']), astot, None)
                 else:
                     ds_att['astot'] = astot[0]
             if len(np.atleast_1d(dutott)>1):
                 if dutott.shape == cur_data.shape:
-                    outputs['dutott'] = ('dutott_{}'.format(bands['wave_name']), dutott.copy(), None)
+                    outputs['dutott'] = ('dutott_{}'.format(bands['wave_name']), dutott, None)
                 else:
                     ds_att['dutott'] = dutott[0]
 
@@ -331,29 +331,29 @@ def _process_surface_reflectance_band(
         if setu['dsf_write_tiled_parameters']:
             if len(np.atleast_1d(rorayl_cur)>1):
                 if rorayl_cur.shape == cur_data.shape:
-                    outputs['rorayl'] = ('rorayl_{}'.format(bands['wave_name']), rorayl_cur.copy(), None)
+                    outputs['rorayl'] = ('rorayl_{}'.format(bands['wave_name']), rorayl_cur, None)
                 else:
                     ds_att['rorayl'] = rorayl_cur[0]
             if len(np.atleast_1d(dutotr_cur)>1):
                 if dutotr_cur.shape == cur_data.shape:
-                    outputs['dutotr'] = ('dutotr_{}'.format(bands['wave_name']), dutotr_cur.copy(), None)
+                    outputs['dutotr'] = ('dutotr_{}'.format(bands['wave_name']), dutotr_cur, None)
                 else:
                     ds_att['dutotr'] = dutotr_cur[0]
 
         cur_rhorc = (cur_rhorc - rorayl_cur) / (dutotr_cur)
-        outputs['rhorc'] = (dso.replace('rhos_', 'rhorc_'), cur_rhorc.copy(), ds_att.copy())
+        outputs['rhorc'] = (dso.replace('rhos_', 'rhorc_'), cur_rhorc, ds_att)
         del cur_rhorc, rorayl_cur, dutotr_cur
 
     if ac_opt == 'dsf' and setu['slicing']:
         del valid_mask
 
     ## write rhos
-    outputs['rhos'] = (dso, cur_data.copy(), ds_att.copy())
+    outputs['rhos'] = (dso, cur_data, ds_att)
     del cur_data
 
     ## write Ed data
     if setu['output_ed']:
-        outputs['Ed'] = (dso.replace('rhos_', 'Ed_'), Ed.copy(), ds_att.copy())
+        outputs['Ed'] = (dso.replace('rhos_', 'Ed_'), Ed, ds_att)
         del Ed
 
     if setu['verbosity'] > 1: print('{}/B{} took {:.1f}s ({})'.format(sensor_lut, b, time.time()-t0, 'RevLUT' if use_revlut else 'StdLUT'))
@@ -2524,7 +2524,7 @@ def compute_and_apply_glint_correction(b, cur_data, ds_att, gc_user, gc_SWIR1, g
     # Remove glint from rhos
     cur_data[sub_gc] -= cur_rhog
     output = {}
-    output[rhos_ds] = (rhos_ds, cur_data.copy(), ds_att)
+    output[rhos_ds] = (rhos_ds, cur_data, ds_att)
     return output
     # gemo.write(rhos_ds, cur_data, ds_att=gemo.bands[b])
 
