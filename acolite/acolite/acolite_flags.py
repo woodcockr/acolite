@@ -6,11 +6,64 @@
 ## modifications: 2024-05-21 (QV) skip negative rhos masking if rhos datasets are not present
 ##                2024-01-31 (QV) use first dataset to determine dimensions
 ##                2025-02-04 (QV) updated settings parsing
+import concurrent.futures
+
+import numpy as np
+import scipy.ndimage
+
+import acolite as ac
+
+def compute_non_water_swir_mask(gem, rhot_ds, rhot_waves, setu):
+    """
+    Compute the non-water/SWIR threshold mask and return the mask as an integer array.
+    """
+    if setu['verbosity'] > 3:
+        print('Computing non water threshold mask.')
+    cidx, cwave = ac.shared.closest_idx(rhot_waves, setu['l2w_mask_wave'])
+    # use M bands for masking if needed
+    if ('VIIRS' in gem.gatts['sensor']) & (setu['viirs_mask_mband']):
+        rhot_waves_m = [int(ds.split('_')[-1]) for ds in rhot_ds if 'M' in ds]
+        cidx, cwave = ac.shared.closest_idx(rhot_waves_m, setu['l2w_mask_wave'])
+    cur_par = 'rhot_{}'.format(cwave)
+    cur_par = [ds for ds in rhot_ds if ('{:.0f}'.format(cwave) in ds)][0]
+    if setu['verbosity'] > 3:
+        print('Computing non water threshold mask from {} > {}.'.format(cur_par, setu['l2w_mask_threshold']))
+    cur_data = gem.data(cur_par)
+    if setu['l2w_mask_smooth']:
+        cur_data = ac.shared.fillnan(cur_data)
+        cur_data = scipy.ndimage.gaussian_filter(cur_data, setu['l2w_mask_smooth_sigma'], mode='reflect')
+    cur_mask = cur_data > setu['l2w_mask_threshold']
+    mask_result = cur_mask.astype(np.int32) * (2 ** setu['flag_exponent_swir'])
+    return mask_result
+
+def compute_cirrus_mask(gem, rhot_ds, rhot_waves, setu):
+    """
+    Compute cirrus mask .
+    Returns a flags array or None if no suitable band is found.
+    """
+    if setu['verbosity'] > 3:
+        print('Computing cirrus mask.')
+    cidx, cwave = ac.shared.closest_idx(rhot_waves, setu['l2w_mask_cirrus_wave'])
+    if np.abs(cwave - setu['l2w_mask_cirrus_wave']) < 5:
+        cur_par = 'rhot_{}'.format(cwave)
+        cur_par = [ds for ds in rhot_ds if ('{:.0f}'.format(cwave) in ds)][0]
+
+        if setu['verbosity'] > 3:
+            print('Computing cirrus mask from {} > {}.'.format(cur_par, setu['l2w_mask_cirrus_threshold']))
+        cur_data = gem.data(cur_par)
+        if setu['l2w_mask_smooth']:
+            cur_data = ac.shared.fillnan(cur_data)
+            cur_data = scipy.ndimage.gaussian_filter(cur_data, setu['l2w_mask_smooth_sigma'], mode='reflect')
+        cirrus_mask = cur_data > setu['l2w_mask_cirrus_threshold']
+        flags = (cirrus_mask.astype(np.int32) * (2 ** setu['flag_exponent_cirrus']))
+    else:
+        flags = None
+        if setu['verbosity'] > 2:
+            print('No suitable band found for cirrus masking.')
+    return flags
 
 def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, return_flags_dataset=True):
-    import acolite as ac
-    import numpy as np
-    import scipy.ndimage
+
 
     ## read gem file if NetCDF
     if type(gem) is str:
@@ -59,46 +112,55 @@ def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, ret
     ## compute flags
     ####
     ## non water/swir threshold
-    if setu['verbosity'] > 3: print('Computing non water threshold mask.')
-    cidx,cwave = ac.shared.closest_idx(rhot_waves, setu['l2w_mask_wave'])
-    ## use M bands for masking
-    if ('VIIRS' in gem.gatts['sensor']) & (setu['viirs_mask_mband']):
-        rhot_waves_m = [int(ds.split('_')[-1]) for ds in rhot_ds if 'M' in ds]
-        cidx,cwave = ac.shared.closest_idx(rhot_waves_m, setu['l2w_mask_wave'])
-    cur_par = 'rhot_{}'.format(cwave)
-    cur_par = [ds for ds in rhot_ds if ('{:.0f}'.format(cwave) in ds)][0]
-    if setu['verbosity'] > 3: print('Computing non water threshold mask from {} > {}.'.format(cur_par, setu['l2w_mask_threshold']))
-    cur_data = gem.data(cur_par)
-    if setu['l2w_mask_smooth']:
-        cur_data = ac.shared.fillnan(cur_data)
-        cur_data = scipy.ndimage.gaussian_filter(cur_data, setu['l2w_mask_smooth_sigma'], mode='reflect')
-    cur_mask = cur_data > setu['l2w_mask_threshold']
-    cur_data = None
-    flags = cur_mask.astype(np.int32)*(2**setu['flag_exponent_swir'])
-    cur_mask = None
-    ## end non water/swir threshold
+    # if setu['verbosity'] > 3: print('Computing non water threshold mask.')
+    # cidx,cwave = ac.shared.closest_idx(rhot_waves, setu['l2w_mask_wave'])
+    # ## use M bands for masking
+    # if ('VIIRS' in gem.gatts['sensor']) & (setu['viirs_mask_mband']):
+    #     rhot_waves_m = [int(ds.split('_')[-1]) for ds in rhot_ds if 'M' in ds]
+    #     cidx,cwave = ac.shared.closest_idx(rhot_waves_m, setu['l2w_mask_wave'])
+    # cur_par = 'rhot_{}'.format(cwave)
+    # cur_par = [ds for ds in rhot_ds if ('{:.0f}'.format(cwave) in ds)][0]
+    # if setu['verbosity'] > 3: print('Computing non water threshold mask from {} > {}.'.format(cur_par, setu['l2w_mask_threshold']))
+    # cur_data = gem.data(cur_par)
+    # if setu['l2w_mask_smooth']:
+    #     cur_data = ac.shared.fillnan(cur_data)
+    #     cur_data = scipy.ndimage.gaussian_filter(cur_data, setu['l2w_mask_smooth_sigma'], mode='reflect')
+    # cur_mask = cur_data > setu['l2w_mask_threshold']
+    # cur_data = None
+    # flags = cur_mask.astype(np.int32)*(2**setu['flag_exponent_swir'])
+    # cur_mask = None
+    # ## end non water/swir threshold
     ####
 
     ####
     ## cirrus masking
-    if setu['verbosity'] > 3: print('Computing cirrus mask.')
-    cidx,cwave = ac.shared.closest_idx(rhot_waves, setu['l2w_mask_cirrus_wave'])
-    if np.abs(cwave - setu['l2w_mask_cirrus_wave']) < 5:
-        cur_par = 'rhot_{}'.format(cwave)
-        cur_par = [ds for ds in rhot_ds if ('{:.0f}'.format(cwave) in ds)][0]
+    # if setu['verbosity'] > 3: print('Computing cirrus mask.')
+    # cidx,cwave = ac.shared.closest_idx(rhot_waves, setu['l2w_mask_cirrus_wave'])
+    # if np.abs(cwave - setu['l2w_mask_cirrus_wave']) < 5:
+    #     cur_par = 'rhot_{}'.format(cwave)
+    #     cur_par = [ds for ds in rhot_ds if ('{:.0f}'.format(cwave) in ds)][0]
 
-        if setu['verbosity'] > 3: print('Computing cirrus mask from {} > {}.'.format(cur_par, setu['l2w_mask_cirrus_threshold']))
-        cur_data = gem.data(cur_par)
-        if setu['l2w_mask_smooth']:
-            cur_data = ac.shared.fillnan(cur_data)
-            cur_data = scipy.ndimage.gaussian_filter(cur_data, setu['l2w_mask_smooth_sigma'], mode='reflect')
-        cirrus_mask = cur_data > setu['l2w_mask_cirrus_threshold']
-        cirrus = None
-        flags = (flags) | (cirrus_mask.astype(np.int32)*(2**setu['flag_exponent_cirrus']))
-        cirrus_mask = None
-    else:
-        if setu['verbosity'] > 2: print('No suitable band found for cirrus masking.')
+    #     if setu['verbosity'] > 3: print('Computing cirrus mask from {} > {}.'.format(cur_par, setu['l2w_mask_cirrus_threshold']))
+    #     cur_data = gem.data(cur_par)
+    #     if setu['l2w_mask_smooth']:
+    #         cur_data = ac.shared.fillnan(cur_data)
+    #         cur_data = scipy.ndimage.gaussian_filter(cur_data, setu['l2w_mask_smooth_sigma'], mode='reflect')
+    #     cirrus_mask = cur_data > setu['l2w_mask_cirrus_threshold']
+    #     cirrus = None
+    #     flags = (flags) | (cirrus_mask.astype(np.int32)*(2**setu['flag_exponent_cirrus']))
+    #     cirrus_mask = None
+    # else:
+    #     if setu['verbosity'] > 2: print('No suitable band found for cirrus masking.')
     ## end cirrus masking
+    # Run compute_non_water_swir_mask and compute_cirrus_mask in parallel
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future_swir = executor.submit(compute_non_water_swir_mask, gem, rhot_ds, rhot_waves, setu)
+        future_cirrus = executor.submit(compute_cirrus_mask, gem, rhot_ds, rhot_waves, setu)
+        flags = future_swir.result()
+        cirrus_flags = future_cirrus.result()
+
+    if cirrus_flags is not None:
+        flags = (flags) | cirrus_flags
     ####
 
     ####
@@ -106,25 +168,73 @@ def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, ret
     if setu['verbosity'] > 3: print('Computing TOA limit mask.')
     toa_mask = None
     outmask = None
+
+    # Pre-load the gem data for rhot datasets
     for ci, cur_par in enumerate(rhot_ds):
-        if rhot_waves[ci]<setu['l2w_mask_high_toa_wave_range'][0]: continue
-        if rhot_waves[ci]>setu['l2w_mask_high_toa_wave_range'][1]: continue
-        if setu['verbosity'] > 3: print('Computing TOA limit mask from {} > {}.'.format(cur_par, setu['l2w_mask_high_toa_threshold']))
+        gem.data(cur_par, store=True, return_data=False)
+
+    def toa_mask_worker(args):
+        ci, cur_par, rhot_waves, rhot_ds, setu, gem = args
+        if rhot_waves[ci] < setu['l2w_mask_high_toa_wave_range'][0]:
+            return None
+        if rhot_waves[ci] > setu['l2w_mask_high_toa_wave_range'][1]:
+            return None
+        if setu['verbosity'] > 3:
+            print('Computing TOA limit mask from {} > {}.'.format(cur_par, setu['l2w_mask_high_toa_threshold']))
         cwave = rhot_waves[ci]
         cur_par = [ds for ds in rhot_ds if ('{:.0f}'.format(cwave) in ds)][0]
-        cur_data = gem.data(cur_par)
-        if outmask is None: outmask = np.zeros(cur_data.shape).astype(bool)
-        outmask = (outmask) | (np.isnan(cur_data))
+        cur_data = gem.data_mem[cur_par]
+        local_outmask = np.isnan(cur_data)
         if setu['l2w_mask_smooth']:
             cur_data = ac.shared.fillnan(cur_data)
             cur_data = scipy.ndimage.gaussian_filter(cur_data, setu['l2w_mask_smooth_sigma'], mode='reflect')
-        if toa_mask is None: toa_mask = np.zeros(cur_data.shape).astype(bool)
-        toa_mask = (toa_mask) | (cur_data > setu['l2w_mask_high_toa_threshold'])
+        local_toa_mask = cur_data > setu['l2w_mask_high_toa_threshold']
+        return local_outmask, local_toa_mask
+
+    # Prepare arguments for parallel execution
+    toa_args = [(ci, cur_par, rhot_waves, rhot_ds, setu, gem) for ci, cur_par in enumerate(rhot_ds)]
+
+    toa_mask = None
+    outmask = None
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        results = list(executor.map(toa_mask_worker, toa_args))
+
+    for res in results:
+        if res is None:
+            continue
+        local_outmask, local_toa_mask = res
+        if outmask is None:
+            outmask = np.zeros(local_outmask.shape).astype(bool)
+        if toa_mask is None:
+            toa_mask = np.zeros(local_toa_mask.shape).astype(bool)
+        outmask = outmask | local_outmask
+        toa_mask = toa_mask | local_toa_mask
+
     flags = (flags) | (toa_mask.astype(np.int32)*(2**setu['flag_exponent_toa']))
     toa_mask = None
     flags = (flags) | (outmask.astype(np.int32)*(2**setu['flag_exponent_outofscene']))
     outmask = None
     ## end TOA out of limit
+    # for ci, cur_par in enumerate(rhot_ds):
+    #     if rhot_waves[ci]<setu['l2w_mask_high_toa_wave_range'][0]: continue
+    #     if rhot_waves[ci]>setu['l2w_mask_high_toa_wave_range'][1]: continue
+    #     if setu['verbosity'] > 3: print('Computing TOA limit mask from {} > {}.'.format(cur_par, setu['l2w_mask_high_toa_threshold']))
+    #     cwave = rhot_waves[ci]
+    #     cur_par = [ds for ds in rhot_ds if ('{:.0f}'.format(cwave) in ds)][0]
+    #     cur_data = gem.data_mem(cur_par)
+    #     if outmask is None: outmask = np.zeros(cur_data.shape).astype(bool)
+    #     outmask = (outmask) | (np.isnan(cur_data))
+    #     if setu['l2w_mask_smooth']:
+    #         cur_data = ac.shared.fillnan(cur_data)
+    #         cur_data = scipy.ndimage.gaussian_filter(cur_data, setu['l2w_mask_smooth_sigma'], mode='reflect')
+    #     if toa_mask is None: toa_mask = np.zeros(cur_data.shape).astype(bool)
+    #     toa_mask = (toa_mask) | (cur_data > setu['l2w_mask_high_toa_threshold'])
+    # flags = (flags) | (toa_mask.astype(np.int32)*(2**setu['flag_exponent_toa']))
+    # toa_mask = None
+    # flags = (flags) | (outmask.astype(np.int32)*(2**setu['flag_exponent_outofscene']))
+    # outmask = None
+    # ## end TOA out of limit
     ####
 
     ####
@@ -133,19 +243,55 @@ def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, ret
         if setu['verbosity'] > 3: print('Not computing negative reflectance mask as there are no rhos datasets.')
     else:
         if setu['verbosity'] > 3: print('Computing negative reflectance mask.')
-        neg_mask = None
+
+    # Pre-load the gem data for rhos datasets
         for ci, cur_par in enumerate(rhos_ds):
-            if rhos_waves[ci]<setu['l2w_mask_negative_wave_range'][0]: continue
-            if rhos_waves[ci]>setu['l2w_mask_negative_wave_range'][1]: continue
-            if setu['verbosity'] > 3: print('Computing negative reflectance mask from {}.'.format(cur_par))
+            gem.data(cur_par, store=True, return_data=False)
+
+        def neg_mask_worker(args):
+            ci, cur_par, rhos_waves, rhos_ds, setu, gem = args
+            if rhos_waves[ci] < setu['l2w_mask_negative_wave_range'][0]:
+                return None
+            if rhos_waves[ci] > setu['l2w_mask_negative_wave_range'][1]:
+                return None
+            if setu['verbosity'] > 3:
+                print('Computing negative reflectance mask from {}.'.format(cur_par))
             cwave = rhos_waves[ci]
             cur_par = [ds for ds in rhos_ds if ('{:.0f}'.format(cwave) in ds)][0]
-            cur_data = gem.data(cur_par)
-            #if setu['l2w_mask_smooth']: cur_data = scipy.ndimage.gaussian_filter(cur_data, setu['l2w_mask_smooth_sigma'])
-            if neg_mask is None: neg_mask = np.zeros(cur_data.shape).astype(bool)
-            neg_mask = (neg_mask) | (cur_data < 0)
+            cur_data = gem.data_mem[cur_par]
+            local_neg_mask = cur_data < 0
+            return local_neg_mask
+
+        neg_args = [(ci, cur_par, rhos_waves, rhos_ds, setu, gem) for ci, cur_par in enumerate(rhos_ds)]
+
+        neg_mask = None
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            results = list(executor.map(neg_mask_worker, neg_args))
+
+        for local_neg_mask in results:
+            if local_neg_mask is None:
+                continue
+            if neg_mask is None:
+                neg_mask = np.zeros(local_neg_mask.shape).astype(bool)
+            neg_mask = neg_mask | local_neg_mask
+
         flags = (flags) | (neg_mask.astype(np.int32)*(2**setu['flag_exponent_negative']))
         neg_mask = None
+
+
+        # neg_mask = None
+        # for ci, cur_par in enumerate(rhos_ds):
+        #     if rhos_waves[ci]<setu['l2w_mask_negative_wave_range'][0]: continue
+        #     if rhos_waves[ci]>setu['l2w_mask_negative_wave_range'][1]: continue
+        #     if setu['verbosity'] > 3: print('Computing negative reflectance mask from {}.'.format(cur_par))
+        #     cwave = rhos_waves[ci]
+        #     cur_par = [ds for ds in rhos_ds if ('{:.0f}'.format(cwave) in ds)][0]
+        #     cur_data = gem.data_mem[cur_par]
+        #     #if setu['l2w_mask_smooth']: cur_data = scipy.ndimage.gaussian_filter(cur_data, setu['l2w_mask_smooth_sigma'])
+        #     if neg_mask is None: neg_mask = np.zeros(cur_data.shape).astype(bool)
+        #     neg_mask = (neg_mask) | (cur_data < 0)
+        # flags = (flags) | (neg_mask.astype(np.int32)*(2**setu['flag_exponent_negative']))
+        # neg_mask = None
     ## end negative rhos
     ####
 
