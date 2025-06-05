@@ -29,6 +29,76 @@ import scipy.ndimage
 
 import acolite as ac
 
+import concurrent.futures
+
+def process_band(b, fmeta, setu, waves_names, pan_bands, output_pan, output_pan_ms, mus, pan_scale, sub_pan, warp_to_pan,
+                 sub, warp_to, waves_mu, verbosity, gains_dict, clip_mask, thermal_bands,
+                 output_thermal):
+    if '.TIF' not in fmeta[b]['FILE'].upper():
+        return None
+    if b in setu['landsat_qa_bands']:
+        return None
+    if not os.path.exists(fmeta[b]['FILE']):
+        return None
+
+    if b in waves_names:
+        pan = False
+        if b in pan_bands:  # pan band
+            if (not output_pan) & (not output_pan_ms):
+                return None
+            pan = True
+            mus_pan = scipy.ndimage.zoom(mus, zoom=pan_scale, order=1) if len(np.atleast_1d(mus)) > 1 else mus * 1
+            data = ac.landsat.read_toa(fmeta[b], sub=sub_pan, mus=mus_pan, warp_to=warp_to_pan)
+            mus_pan = None
+        else:  # not a pan band
+            data = ac.landsat.read_toa(fmeta[b], sub=sub, mus=mus, warp_to=warp_to)
+        ds = 'rhot_{}'.format(waves_names[b])
+        ds_att = {'wavelength': waves_mu[b] * 1000}
+        for k in fmeta[b]:
+            ds_att[k] = fmeta[b][k]
+
+        if setu['gains'] & (gains_dict is not None):
+            ds_att['toa_gain'] = gains_dict[b]
+            data *= ds_att['toa_gain']
+            if verbosity > 1:
+                print('Converting bands: Applied TOA gain {} to {}'.format(ds_att['toa_gain'], ds))
+
+        pan_result = None
+        if output_pan & pan:
+            pan_result = (ds, data.copy(), ds_att.copy())
+            if verbosity > 1:
+                print('Converting bands: Prepared {} for separate L1R_pan'.format(ds))
+
+        # prepare for low res output
+        if output_pan_ms & pan:
+            data = scipy.ndimage.zoom(data, zoom=1 / pan_scale, order=1)
+
+        # clip data
+        if (setu['polygon_clip']):
+            data[clip_mask] = np.nan
+
+        ms_result = (ds, data.copy(), ds_att.copy())
+        if verbosity > 1:
+            print('Converting bands: Prepared {} ({})'.format(ds, data.shape))
+        return ('ms', ms_result, pan_result)
+    else:
+        if b in thermal_bands:
+            if output_thermal:
+                ds = 'bt{}'.format(b).lower()
+                ds_att = {'band': b}
+                for k in fmeta[b]:
+                    ds_att[k] = fmeta[b][k]
+                data = ac.landsat.read_toa(fmeta[b], sub=sub, warp_to=warp_to)
+
+                # clip data
+                if (setu['polygon_clip']):
+                    data[clip_mask] = np.nan
+                ms_result = (ds, data.copy(), ds_att.copy())
+                if verbosity > 1:
+                    print('Converting bands: Prepared {}'.format(ds))
+                return ('ms', ms_result, None)
+        else:
+            return None
 
 def l1_convert(inputfile, output = None, settings = None,
 
@@ -370,6 +440,7 @@ def l1_convert(inputfile, output = None, settings = None,
 
 
         ## if we are clipping to a given polygon get the clip_mask here
+        clip_mask = None
         if setu['polygon_clip']:
             clip_mask = ac.shared.polygon_crop(dct_prj, setu['polygon'], return_sub=False)
             clip_mask = clip_mask.astype(bool) == False
@@ -450,64 +521,160 @@ def l1_convert(inputfile, output = None, settings = None,
                 if verbosity > 1: print('Wrote ym')
 
         ## write TOA bands
+        # Only create new gemop if needed
+        gemop = None
+        if output_pan and pan_bands:
+            ofile_pan = ofile.replace('_L1R.nc', '_L1R_pan.nc')
+            gemop = ac.gem.gem(ofile_pan, new=True)
+            gemop.gatts = {k: gatts[k] for k in gatts}
+            gemop.nc_projection = nc_projection_pan
+
         if verbosity > 1: print('Converting bands')
-        for b in fmeta:
-            if '.TIF' not in fmeta[b]['FILE'].upper(): continue
-            if b in setu['landsat_qa_bands']: continue
-            if os.path.exists(fmeta[b]['FILE']):
-                if b in waves_names:
-                    pan = False
-                    if b in pan_bands: ## pan band
-                        if (not output_pan) & (not output_pan_ms): continue
-                        pan = True
-                        mus_pan = scipy.ndimage.zoom(mus, zoom=pan_scale, order=1) if len(np.atleast_1d(mus))>1 else mus * 1
-                        data = ac.landsat.read_toa(fmeta[b], sub=sub_pan, mus=mus_pan, warp_to=warp_to_pan)
-                        mus_pan = None
-                    else: ## not a pan band
-                        data = ac.landsat.read_toa(fmeta[b], sub=sub, mus=mus, warp_to=warp_to)
-                    ds = 'rhot_{}'.format(waves_names[b])
-                    ds_att = {'wavelength':waves_mu[b]*1000}
-                    for k in fmeta[b]: ds_att[k] = fmeta[b][k]
 
-                    if setu['gains'] & (gains_dict is not None):
-                        ds_att['toa_gain'] = gains_dict[b]
-                        data *= ds_att['toa_gain']
-                        if verbosity > 1: print('Converting bands: Applied TOA gain {} to {}'.format(ds_att['toa_gain'], ds))
+        # Prepare arguments for parallel processing
+        band_args = [
+            (
+                b, fmeta, setu, waves_names, pan_bands, output_pan, output_pan_ms, mus, pan_scale, sub_pan, warp_to_pan,
+                sub, warp_to, waves_mu, verbosity, gains_dict, clip_mask, thermal_bands, output_thermal
+            )
+            for b in fmeta
+        ]
+        # Temporary dictionaries to store results
+        temp_results = {}
+        temp_results_pan = {}
 
-                    if output_pan & pan:
-                        ## write output
-                        ofile_pan = ofile.replace('_L1R.nc', '_L1R_pan.nc')
-                        if new_pan:
-                            gemop = ac.gem.gem(ofile_pan, new = True)
-                            gemop.gatts = {k: gatts[k] for k in gatts}
-                            gemop.nc_projection = nc_projection_pan
-                            new_pan = False
-                        gemop.write(ds, data, ds_att = ds_att, replace_nan = True)
-                        if verbosity > 1: print('Converting bands: Wrote {} to separate L1R_pan'.format(ds))
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            results = list(executor.map(lambda args: process_band(*args), band_args))
 
-                    ## prepare for low res output
-                    if output_pan_ms & pan: data = scipy.ndimage.zoom(data, zoom=1/pan_scale, order=1)
+        for res in results:
+            if res is None:
+                continue
+            ms_type, ms_result, pan_result = res
+            if ms_result is not None:
+                ds, data, ds_att = ms_result
+                temp_results[ds] = (data, ds_att)
+            if pan_result is not None:
+                ds, data, ds_att = pan_result
+                temp_results_pan[ds] = (data, ds_att)
 
-                    ## clip data
-                    if (setu['polygon_clip']): data[clip_mask] = np.nan
+        # for b in fmeta:
+        #     if '.TIF' not in fmeta[b]['FILE'].upper(): continue
+        #     if b in setu['landsat_qa_bands']: continue
+        #     if os.path.exists(fmeta[b]['FILE']):
+        #         if b in waves_names:
+        #             pan = False
+        #             if b in pan_bands:  # pan band
+        #                 if (not output_pan) & (not output_pan_ms): continue
+        #                 pan = True
+        #                 mus_pan = scipy.ndimage.zoom(mus, zoom=pan_scale, order=1) if len(np.atleast_1d(mus)) > 1 else mus * 1
+        #                 data = ac.landsat.read_toa(fmeta[b], sub=sub_pan, mus=mus_pan, warp_to=warp_to_pan)
+        #                 mus_pan = None
+        #             else:  # not a pan band
+        #                 data = ac.landsat.read_toa(fmeta[b], sub=sub, mus=mus, warp_to=warp_to)
+        #             ds = 'rhot_{}'.format(waves_names[b])
+        #             ds_att = {'wavelength': waves_mu[b] * 1000}
+        #             for k in fmeta[b]: ds_att[k] = fmeta[b][k]
 
-                    ## write to ms file
-                    gemo.write(ds, data, ds_att = ds_att, replace_nan = True)
-                    if verbosity > 1: print('Converting bands: Wrote {} ({})'.format(ds, data.shape))
-                else:
-                    if b in thermal_bands:
-                        if output_thermal:
-                            ds = 'bt{}'.format(b).lower()
-                            ds_att = {'band':b}
-                            for k in fmeta[b]: ds_att[k] = fmeta[b][k]
-                            data = ac.landsat.read_toa(fmeta[b], sub=sub, warp_to=warp_to)
+        #             if setu['gains'] & (gains_dict is not None):
+        #                 ds_att['toa_gain'] = gains_dict[b]
+        #                 data *= ds_att['toa_gain']
+        #                 if verbosity > 1: print('Converting bands: Applied TOA gain {} to {}'.format(ds_att['toa_gain'], ds))
 
-                            ## clip data
-                            if (setu['polygon_clip']): data[clip_mask] = np.nan
-                            gemo.write(ds, data, ds_att = ds_att, replace_nan = True)
-                            if verbosity > 1: print('Converting bands: Wrote {}'.format(ds))
-                    else:
-                        continue
+        #             if output_pan & pan:
+        #                 temp_results_pan[ds] = (data.copy(), ds_att.copy())
+        #                 if verbosity > 1: print('Converting bands: Prepared {} for separate L1R_pan'.format(ds))
+
+        #             # prepare for low res output
+        #             if output_pan_ms & pan: data = scipy.ndimage.zoom(data, zoom=1 / pan_scale, order=1)
+
+        #             # clip data
+        #             if (setu['polygon_clip']): data[clip_mask] = np.nan
+
+        #             # store for ms file
+        #             temp_results[ds] = (data.copy(), ds_att.copy())
+        #             if verbosity > 1: print('Converting bands: Prepared {} ({})'.format(ds, data.shape))
+        #         else:
+        #             if b in thermal_bands:
+        #                 if output_thermal:
+        #                     ds = 'bt{}'.format(b).lower()
+        #                     ds_att = {'band': b}
+        #                     for k in fmeta[b]: ds_att[k] = fmeta[b][k]
+        #                     data = ac.landsat.read_toa(fmeta[b], sub=sub, warp_to=warp_to)
+
+        #                     # clip data
+        #                     if (setu['polygon_clip']): data[clip_mask] = np.nan
+        #                     temp_results[ds] = (data.copy(), ds_att.copy())
+        #                     if verbosity > 1: print('Converting bands: Prepared {}'.format(ds))
+        #             else:
+        #                 continue
+
+        # Write all results to gemo after processing the bundle
+        for ds, (data, ds_att) in temp_results.items():
+            gemo.write(ds, data, ds_att=ds_att, replace_nan=True)
+            if verbosity > 1: print('Converting bands: Wrote {} ({})'.format(ds, data.shape))
+
+        if output_pan and temp_results_pan:
+            for ds, (data, ds_att) in temp_results_pan.items():
+                gemop.write(ds, data, ds_att=ds_att, replace_nan=True)
+                if verbosity > 1: print('Converting bands: Wrote {} to separate L1R_pan'.format(ds))
+
+        # for b in fmeta:
+        #     if '.TIF' not in fmeta[b]['FILE'].upper(): continue
+        #     if b in setu['landsat_qa_bands']: continue
+        #     if os.path.exists(fmeta[b]['FILE']):
+        #         if b in waves_names:
+        #             pan = False
+        #             if b in pan_bands: ## pan band
+        #                 if (not output_pan) & (not output_pan_ms): continue
+        #                 pan = True
+        #                 mus_pan = scipy.ndimage.zoom(mus, zoom=pan_scale, order=1) if len(np.atleast_1d(mus))>1 else mus * 1
+        #                 data = ac.landsat.read_toa(fmeta[b], sub=sub_pan, mus=mus_pan, warp_to=warp_to_pan)
+        #                 mus_pan = None
+        #             else: ## not a pan band
+        #                 data = ac.landsat.read_toa(fmeta[b], sub=sub, mus=mus, warp_to=warp_to)
+        #             ds = 'rhot_{}'.format(waves_names[b])
+        #             ds_att = {'wavelength':waves_mu[b]*1000}
+        #             for k in fmeta[b]: ds_att[k] = fmeta[b][k]
+
+        #             if setu['gains'] & (gains_dict is not None):
+        #                 ds_att['toa_gain'] = gains_dict[b]
+        #                 data *= ds_att['toa_gain']
+        #                 if verbosity > 1: print('Converting bands: Applied TOA gain {} to {}'.format(ds_att['toa_gain'], ds))
+
+        #             if output_pan & pan:
+        #                 ## write output
+        #                 ofile_pan = ofile.replace('_L1R.nc', '_L1R_pan.nc')
+        #                 if new_pan:
+        #                     gemop = ac.gem.gem(ofile_pan, new = True)
+        #                     gemop.gatts = {k: gatts[k] for k in gatts}
+        #                     gemop.nc_projection = nc_projection_pan
+        #                     new_pan = False
+        #                 gemop.write(ds, data, ds_att = ds_att, replace_nan = True)
+        #                 if verbosity > 1: print('Converting bands: Wrote {} to separate L1R_pan'.format(ds))
+
+        #             ## prepare for low res output
+        #             if output_pan_ms & pan: data = scipy.ndimage.zoom(data, zoom=1/pan_scale, order=1)
+
+        #             ## clip data
+        #             if (setu['polygon_clip']): data[clip_mask] = np.nan
+
+        #             ## write to ms file
+        #             gemo.write(ds, data, ds_att = ds_att, replace_nan = True)
+        #             if verbosity > 1: print('Converting bands: Wrote {} ({})'.format(ds, data.shape))
+        #         else:
+        #             if b in thermal_bands:
+        #                 if output_thermal:
+        #                     ds = 'bt{}'.format(b).lower()
+        #                     ds_att = {'band':b}
+        #                     for k in fmeta[b]: ds_att[k] = fmeta[b][k]
+        #                     data = ac.landsat.read_toa(fmeta[b], sub=sub, warp_to=warp_to)
+
+        #                     ## clip data
+        #                     if (setu['polygon_clip']): data[clip_mask] = np.nan
+        #                     gemo.write(ds, data, ds_att = ds_att, replace_nan = True)
+        #                     if verbosity > 1: print('Converting bands: Wrote {}'.format(ds))
+        #             else:
+        #                 continue
 
         ## output quality assesment bands
         if setu['landsat_qa_output']:
