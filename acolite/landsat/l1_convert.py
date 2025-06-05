@@ -17,6 +17,18 @@
 ##                2025-02-02 (QV) removed percentiles
 ##                2025-02-04 (QV) improved settings handling
 ##                2025-02-10 (QV) cleaned up settings use, output naming
+import copy
+import datetime
+import glob
+import os
+import time
+
+import dateutil.parser
+import numpy as np
+import scipy.ndimage
+
+import acolite as ac
+
 
 def l1_convert(inputfile, output = None, settings = None,
 
@@ -30,11 +42,6 @@ def l1_convert(inputfile, output = None, settings = None,
                 check_time = True,
                 max_merge_time = 600, # seconds
                 ):
-
-    import os, glob, datetime, dateutil.parser, time, copy
-    import acolite as ac
-    import scipy.ndimage
-    import numpy as np
     t0 = time.time()
 
     ## get run settings
