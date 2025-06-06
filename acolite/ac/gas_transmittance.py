@@ -3,12 +3,13 @@
 ## written by Quinten Vanhellemont, RBINS
 ## 2019-04-02
 ## modifications: 2022-11-17 (QV) added 2D interpolation for a given sensor, added new tto3_interp function
+import acolite as ac
+import numpy as np
 
 def gas_transmittance(sza, vza, pressure = 1013, waves = None, uoz = 0.3, uwv = 1.5,
                       gases = ['h2o', 'o3', 'o2', 'co2', 'n2o', 'ch4'], lutconfig = '202106F',
                       rsr = None, sensor = None):
-    import acolite as ac
-    import numpy as np
+
 
     ## hyperspectral
     if sensor is None:

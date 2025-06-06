@@ -437,7 +437,7 @@ def acolite_l2r(gem,
     if setu['blackfill_skip']:
         rhot_wv = [int(ds.split('_')[-1]) for ds in rhot_ds] ## use last element of rhot name as wavelength
         bi, bw = ac.shared.closest_idx(rhot_wv, setu['blackfill_wave'])
-        band_data = 1.0*gem.data(rhot_ds[bi])
+        band_data = gem.data(rhot_ds[bi]).copy()
         npx = band_data.shape[0] * band_data.shape[1]
         #nbf = npx - len(np.where(np.isfinite(band_data))[0])
         nbf = npx - len(np.where(np.isfinite(band_data)*(band_data>0))[0])
@@ -649,6 +649,7 @@ def acolite_l2r(gem,
         gem.gatts['wind'] = min(20, gem.gatts['wind'])
 
     ## get mean average geometry
+    if setu['verbosity'] > 1: print('Computing mean average geometry')
     geom_ds = ['sza', 'vza', 'raa', 'pressure', 'wind']
     for ds in gem.datasets:
         if ('raa_' in ds) or ('vza_' in ds):
@@ -667,7 +668,18 @@ def acolite_l2r(gem,
                         sza[high_sza] = setu['sza_limit']
                         print('Mean SZA after replacing SZA > {}: {:.3f}'.format(setu['sza_limit'],np.nanmean(sza)))
                 del sza, high_sza
-    geom_mean = {k: np.nanmean(gem.data(k)) if k in gem.datasets else gem.gatts[k] for k in geom_ds}
+    # geom_mean = {k: np.nanmean(gem.data(k)) if k in gem.datasets else gem.gatts[k] for k in geom_ds}
+    def _compute_geom_mean_worker(args):
+        k, gem = args
+        if k in gem.datasets:
+            return k, np.nanmean(gem.data(k))
+        else:
+            return k, gem.gatts[k]
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=setu['max_workers']) as executor:
+        geom_mean_items = executor.map(_compute_geom_mean_worker, [(k, gem) for k in geom_ds])
+        geom_mean = dict(geom_mean_items)
+
     if (geom_mean['sza'] > setu['sza_limit']):
         print('Warning: SZA out of LUT range')
         print('Mean SZA: {:.3f}'.format(geom_mean['sza']))
@@ -683,6 +695,7 @@ def acolite_l2r(gem,
             print('Mean VZA after replacing VZA > {}: {:.3f}'.format(setu['vza_limit'],geom_mean['vza']))
 
     ## get gas transmittance
+    if setu['verbosity'] > 1: print('Computing gas transmittance')
     tg_dict = ac.ac.gas_transmittance(geom_mean['sza'], geom_mean['vza'],
                                       uoz=gem.gatts['uoz'], uwv=gem.gatts['uwv'],
                                       rsr=rsrd['rsr'])
@@ -752,8 +765,7 @@ def acolite_l2r(gem,
         if ds not in gem.datasets:
             gem.data_mem[ds] = geom_mean[ds]
         else:
-            tmp = gem.data(ds, store=True)
-            del tmp
+            gem.data(ds, store=True, return_data=False)
         if len(np.atleast_1d(gem.data(ds)))>1:
             use_revlut=True ## if any dataset more than 1 dimension use revlut
             per_pixel_geometry = True
@@ -1007,7 +1019,7 @@ def acolite_l2r(gem,
                 for b in gem.bands
             ]
 
-            with concurrent.futures.ThreadPoolExecutor() as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=setu['max_workers']) as executor:
                 results = executor.map(_process_dsf_band_wrapper, band_args)
                 for result in results:
                     if result is None:
@@ -1463,7 +1475,7 @@ def acolite_l2r(gem,
             ))
 
     # all_results = []
-    with concurrent.futures.ThreadPoolExecutor() as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=setu['max_workers']) as executor:
         _ = executor.map(_process_band_wrapper, band_args)
 
     ## glint correction
@@ -1571,7 +1583,7 @@ def acolite_l2r(gem,
                     for rhos_ds, b in wave_band_mapping
                 ]
 
-                with concurrent.futures.ThreadPoolExecutor() as executor:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=setu['max_workers']) as executor:
                     results = executor.map(_glint_band_worker, args_list)
                     for result in results:
                         if 'T_USER' in result:
@@ -2545,7 +2557,7 @@ def process_glint_correction_parallel(
         )
         return
 
-    with concurrent.futures.ThreadPoolExecutor() as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=setu['max_workers']) as executor:
         results = executor.map(_process_single_band, band_data_dict.items())
 
     return
