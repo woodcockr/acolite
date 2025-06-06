@@ -7,14 +7,13 @@
 ##                                this improves peak memory use when several datasets are kept in memory
 ##                2021-02-11 (QV) added smooth keyword,  default to nearest
 ##                2024-04-18 (QV) new version using interpn, added option to use RGI
+import numpy as np
+from scipy.interpolate import interpn, RegularGridInterpolator
+from scipy.ndimage import uniform_filter
+import acolite as ac
 
 def tiles_interp(data, xnew, ynew, smooth = False, kern_size=2, method='nearest', mask = None,
                  target_mask = None, target_mask_full = False, fill_nan = True, dtype = 'float32', use_rgi = False):
-
-    import numpy as np
-    from scipy.interpolate import interpn, RegularGridInterpolator
-    from scipy.ndimage import uniform_filter
-    import acolite as ac
 
     if mask is not None: data[mask] = np.nan
 
@@ -22,7 +21,7 @@ def tiles_interp(data, xnew, ynew, smooth = False, kern_size=2, method='nearest'
     if fill_nan:
         cur_data = ac.shared.fillnan(data)
     else:
-        cur_data = data*1.0
+        cur_data = data.copy() # *1.0
 
     dim = cur_data.shape
     if smooth: cur_data = uniform_filter(cur_data, size = kern_size)

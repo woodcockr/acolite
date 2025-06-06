@@ -40,7 +40,6 @@ import skimage.measure
 
 import acolite as ac
 
-
 def to_gem_mem(gem, ds_name, data, ds_att):
     """
     Helper to write outputs from _process_surface_reflectance_band to gem data_mem variables.
@@ -200,14 +199,14 @@ def _process_surface_reflectance_band(
 
         ## create full scene parameters for segmented processing
         if setu['dsf_aot_estimate'] == 'segmented':
-            romix_ = romix * 1.0
-            astot_ = astot * 1.0
-            dutott_ = dutott * 1.0
+            romix_ = romix.copy() # * 1.0
+            astot_ = astot.copy() # * 1.0
+            dutott_ = dutott.copy() # * 1.0
             romix = np.zeros(gatts['data_dimensions']) + np.nan
             astot = np.zeros(gatts['data_dimensions']) + np.nan
             dutott = np.zeros(gatts['data_dimensions']) + np.nan
             if (setu['output_ed']):
-                dtott_ = dtott * 1.0
+                dtott_ = dtott.copy() # * 1.0
                 dtott = np.zeros(gatts['data_dimensions']) + np.nan
             for sidx, segment in enumerate(segment_data):
                 romix[segment_data[segment]['sub']] = romix_[sidx]
