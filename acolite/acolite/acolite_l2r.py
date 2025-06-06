@@ -41,41 +41,32 @@ import skimage.measure
 import acolite as ac
 
 
-def write_surface_reflectance_outputs(gemo, outputs, to_mem_only=False):
+def to_gem_mem(gem, ds_name, data, ds_att):
     """
-    Helper to write outputs from _process_surface_reflectance_band to gemo.
+    Helper to write outputs from _process_surface_reflectance_band to gem data_mem variables.
     """
-    for key, value in outputs.items():
-        ds_name, data, ds_att = value
-        if to_mem_only:
-            # Store in memory only, do not write to file
-            gemo.data_mem[ds_name] = data
-            gemo.data_att[ds_name] = ds_att
-            if ds_name not in gemo.datasets:
-                gemo.datasets.append(ds_name)
-        else:
-            gemo.write(ds_name, data, ds_att=ds_att)
+    gem.data_mem[ds_name] = data
+    gem.data_att[ds_name] = ds_att
+    if ds_name not in gem.datasets:
+        gem.datasets.append(ds_name)
 
 def _process_surface_reflectance_band(
     b, bands, datasets, data_mem, data_att, gatts, setu, luts, lutdw, rsrd, aot_sel, aot_lut, hyper, hyper_res,
     xnew, ynew, ttot_all, segment_data, copy_rhot, sensor_lut, use_revlut, par, rho_cirrus,
-    ac_opt, gk, exp_lut=None, long_wv=None, short_wv=None, epsilon=None, rhoam=None,
+    ac_opt, gk, gemo, exp_lut=None, long_wv=None, short_wv=None, epsilon=None, rhoam=None,
     exp_fixed_epsilon=None, exp_fixed_rhoam=None, mask=None
 ):
-    # Instead of writing to gemo, collect outputs in a dict
-    outputs = {}
-
     if ('rhot_ds' not in bands) or ('tt_gas' not in bands):
         if setu['verbosity'] > 2: print('Band {} at {} nm not in bands dataset'.format(b, bands['wave_name']))
-        return None
+        return
     if bands['rhot_ds'] not in datasets:
         if setu['verbosity'] > 2: print('Band {} at {} nm not in available rhot datasets'.format(b, bands['wave_name']))
-        return None ## skip if we don't have rhot for a band that is in the RSR file
+        return ## skip if we don't have rhot for a band that is in the RSR file
 
     ## temporary fix
     if (bands['wave_mu'] < 0.345) & (lutdw[luts[0]]['meta']['wave'][0] >= 0.34):
         if setu['verbosity'] > 2: print('Band {} at {} nm wavelength < 345 nm'.format(b, bands['wave_name']))
-        return None ## skip if below LUT range
+        return ## skip if below LUT range
 
     dsi = bands['rhot_ds']
     dso = bands['rhos_ds']
@@ -83,11 +74,11 @@ def _process_surface_reflectance_band(
 
     # Store rhot if needed
     if copy_rhot:
-        outputs['rhot'] = (dsi, cur_data, cur_att)
+        to_gem_mem(gemo, dsi, cur_data, cur_att)
 
     if bands['tt_gas'] < setu['min_tgas_rho']:
         if setu['verbosity'] > 2: print('Band {} at {} nm has tgas < min_tgas_rho ({:.2f} < {:.2f})'.format(b, bands['wave_name'], bands['tt_gas'], setu['min_tgas_rho']))
-        return outputs
+        return
 
     ## apply cirrus correction
     if setu['cirrus_correction']:
@@ -230,17 +221,17 @@ def _process_surface_reflectance_band(
         if setu['dsf_write_tiled_parameters']:
             if len(np.atleast_1d(romix)>1):
                 if romix.shape == cur_data.shape:
-                    outputs['romix'] = ('romix_{}'.format(bands['wave_name']), romix, None)
+                    to_gem_mem(gemo, 'romix_{}'.format(bands['wave_name']), romix, None)
                 else:
                     ds_att['romix'] = romix[0]
             if len(np.atleast_1d(astot)>1):
                 if astot.shape == cur_data.shape:
-                    outputs['astot'] = ('astot_{}'.format(bands['wave_name']), astot, None)
+                    to_gem_mem(gemo, 'astot_{}'.format(bands['wave_name']), astot, None)
                 else:
                     ds_att['astot'] = astot[0]
             if len(np.atleast_1d(dutott)>1):
                 if dutott.shape == cur_data.shape:
-                    outputs['dutott'] = ('dutott_{}'.format(bands['wave_name']), dutott, None)
+                    to_gem_mem(gemo, 'dutott_{}'.format(bands['wave_name']), dutott, None)
                 else:
                     ds_att['dutott'] = dutott[0]
 
@@ -331,34 +322,34 @@ def _process_surface_reflectance_band(
         if setu['dsf_write_tiled_parameters']:
             if len(np.atleast_1d(rorayl_cur)>1):
                 if rorayl_cur.shape == cur_data.shape:
-                    outputs['rorayl'] = ('rorayl_{}'.format(bands['wave_name']), rorayl_cur, None)
+                    to_gem_mem(gemo, 'rorayl_{}'.format(bands['wave_name']), rorayl_cur, None)
                 else:
                     ds_att['rorayl'] = rorayl_cur[0]
             if len(np.atleast_1d(dutotr_cur)>1):
                 if dutotr_cur.shape == cur_data.shape:
-                    outputs['dutotr'] = ('dutotr_{}'.format(bands['wave_name']), dutotr_cur, None)
+                    to_gem_mem(gemo, 'dutotr_{}'.format(bands['wave_name']), dutotr_cur, None)
                 else:
                     ds_att['dutotr'] = dutotr_cur[0]
 
         cur_rhorc = (cur_rhorc - rorayl_cur) / (dutotr_cur)
-        outputs['rhorc'] = (dso.replace('rhos_', 'rhorc_'), cur_rhorc, ds_att)
+        to_gem_mem(gemo, dso.replace('rhos_', 'rhorc_'), cur_rhorc, ds_att)
         del cur_rhorc, rorayl_cur, dutotr_cur
 
     if ac_opt == 'dsf' and setu['slicing']:
         del valid_mask
 
     ## write rhos
-    outputs['rhos'] = (dso, cur_data, ds_att)
+    to_gem_mem(gemo, dso, cur_data, ds_att)
     del cur_data
 
     ## write Ed data
     if setu['output_ed']:
-        outputs['Ed'] = (dso.replace('rhos_', 'Ed_'), Ed, ds_att)
+        to_gem_mem(gemo, dso.replace('rhos_', 'Ed_'), Ed, ds_att)
         del Ed
 
     if setu['verbosity'] > 1: print('{}/B{} took {:.1f}s ({})'.format(sensor_lut, b, time.time()-t0, 'RevLUT' if use_revlut else 'StdLUT'))
 
-    return outputs
+    return
 
 def _should_use_band_for_dsf(b, gem_bands_b, gem_datasets, setu):
     """
@@ -1461,30 +1452,20 @@ def acolite_l2r(gem,
             band_args.append((
                 b, gem.bands[b], gem.datasets, gem.data_mem, gem.data_att, gem.gatts, setu, luts, lutdw, rsrd,
                 aot_sel, aot_lut, hyper, hyper_res, xnew, ynew, ttot_all, segment_data, copy_rhot, sensor_lut,
-                use_revlut, par, rho_cirrus, ac_opt, gk
+                use_revlut, par, rho_cirrus, ac_opt, gk, gemo
             ))
         elif ac_opt == 'exp':
             # WIP Untested refactor: exp option
             band_args.append((
                 b, gem.bands[b], gem.datasets, gem.data_mem, gem.data_att, gem.gatts, setu, luts, lutdw, rsrd,
                 aot_sel, aot_lut, hyper, hyper_res, xnew, ynew, ttot_all, segment_data, copy_rhot, sensor_lut,
-                use_revlut, par, rho_cirrus, ac_opt, gk, exp_lut, long_wv, short_wv, epsilon, rhoam,
+                use_revlut, par, rho_cirrus, ac_opt, gk, gemo, exp_lut, long_wv, short_wv, epsilon, rhoam,
                 exp_fixed_epsilon, exp_fixed_rhoam, mask
             ))
 
-    all_results = []
+    # all_results = []
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        results = executor.map(_process_band_wrapper, band_args)
-        for result in results:
-            if result is not None:
-                all_results.append(result)
-
-    # Write all outputs to gemo
-    for outputs in all_results:
-        write_surface_reflectance_outputs(gemo, outputs, to_mem_only=True)
-
-    ## update outputfile dataset info
-    # gemo.datasets_read()
+        _ = executor.map(_process_band_wrapper, band_args)
 
     ## glint correction
     if (ac_opt == 'dsf') & (setu['dsf_residual_glint_correction']) & (setu['dsf_residual_glint_correction_method']=='default'):
@@ -1602,8 +1583,6 @@ def acolite_l2r(gem,
                             T_SWIR2 = result['T_SWIR2']
 
                 ## swir band choice is made for first band
-                ## WIP glint correction first band - treated separately as it is used to choose glint correction band
-                # WIP This partial calculation is repeated below for band 1 and it may be possible to prevent that.
                 for ib, b in enumerate(gemo.bands):
                     rhos_ds = gemo.bands[b]['rhos_ds']
                     if rhos_ds not in gemo.datasets or b not in ttot_all:
@@ -1659,15 +1638,13 @@ def acolite_l2r(gem,
                         continue
                     band_data_dict[b] = (gemo.data(rhos_ds), gemo.bands[b])
 
-                outputs = process_glint_correction_parallel(
+                process_glint_correction_parallel(
                     band_data_dict, ttot_all, xnew, ynew, muv, mus, sub_gc,
                     omega, refri_sen, Rf_sen, gc_user, gc_swir1_b, gc_swir2_b,
-                    T_USER, T_SWIR1, T_SWIR2, setu, segment_data, rhog_ref, use_swir1
+                    T_USER, T_SWIR1, T_SWIR2, setu, segment_data, rhog_ref, use_swir1, gemo
                 )
 
                 # Write the outputs
-                for output in outputs:
-                    write_surface_reflectance_outputs(gemo, output, to_mem_only=True)
                 for ds in gemo.datasets: # write out everything in gemo.data_mem
                     gemo.write_ds(ds)
 
@@ -1677,8 +1654,6 @@ def acolite_l2r(gem,
                 else:
                     del T_SWIR1, T_SWIR2, use_swir1
             del Rf_sen, omega, muv, mus
-        # if (setu['dsf_aot_estimate'] == 'tiled') & (setu['slicing']):
-        #     del valid_mask
     ## end glint correction
 
     ## alternative glint correction
@@ -2482,7 +2457,7 @@ def select_glint_correction_band(gc_user, gc_SWIR1, gc_SWIR2, swir1_rhos, swir2_
     return rhog_ref, use_swir1
 
 def compute_and_apply_glint_correction(b, cur_data, ds_att, gc_user, gc_SWIR1, gc_SWIR2,
-                                     rhog_ref, use_swir1, sub_gc, rhos_ds):
+                                     rhog_ref, use_swir1, sub_gc, rhos_ds, gemo):
     """
     Compute and apply glint correction for a band, and write results.
 
@@ -2523,10 +2498,9 @@ def compute_and_apply_glint_correction(b, cur_data, ds_att, gc_user, gc_SWIR1, g
 
     # Remove glint from rhos
     cur_data[sub_gc] -= cur_rhog
-    output = {}
-    output[rhos_ds] = (rhos_ds, cur_data, ds_att)
-    return output
-    # gemo.write(rhos_ds, cur_data, ds_att=gemo.bands[b])
+    to_gem_mem(gemo, rhos_ds, cur_data, ds_att)
+
+    return
 
     # Write band glint if requested
     # WIP Not implemented in acolite-mp
@@ -2543,7 +2517,7 @@ def compute_and_apply_glint_correction(b, cur_data, ds_att, gc_user, gc_SWIR1, g
 def process_glint_correction_parallel(
     band_data_dict, ttot_all, xnew, ynew, muv, mus, sub_gc,
     omega, refri_sen, Rf_sen, gc_user, gc_swir1_b, gc_swir2_b,
-    T_USER, T_SWIR1, T_SWIR2, setu, segment_data, rhog_ref, use_swir1
+    T_USER, T_SWIR1, T_SWIR2, setu, segment_data, rhog_ref, use_swir1, gemo
 ):
     """
     Process glint correction for all bands in parallel.
@@ -2566,16 +2540,13 @@ def process_glint_correction_parallel(
             gc_SWIR1 = gc_SWIR2 = None
             gc_USER = glint_factors
 
-        output = compute_and_apply_glint_correction(
+        compute_and_apply_glint_correction(
             b, cur_data, band_b, gc_user, gc_SWIR1, gc_SWIR2,
-            rhog_ref, use_swir1, sub_gc, band_b['rhos_ds']
+            rhog_ref, use_swir1, sub_gc, band_b['rhos_ds'], gemo
         )
-        return output
+        return
 
-    outputs = []
     with concurrent.futures.ThreadPoolExecutor() as executor:
         results = executor.map(_process_single_band, band_data_dict.items())
-        for output in results:
-            if output is not None:
-                outputs.append(output)
-    return outputs
+
+    return
