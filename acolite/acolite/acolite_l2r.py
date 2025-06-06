@@ -1445,7 +1445,6 @@ def acolite_l2r(gem,
 
     hyper_res = None
     ## compute surface reflectances
-    all_outputs = []
 
     # Ensure all gem data in memory (gem.data_mem)
     for ds in gem.datasets:
@@ -1593,7 +1592,7 @@ def acolite_l2r(gem,
                         if 'T_SWIR2' in result:
                             T_SWIR2 = result['T_SWIR2']
 
-                ## swir band choice is made for first band
+                ## swir band choice is made for first band - loop through to find it!
                 for ib, b in enumerate(gemo.bands):
                     rhos_ds = gemo.bands[b]['rhos_ds']
                     if rhos_ds not in gemo.datasets or b not in ttot_all:
@@ -1633,9 +1632,9 @@ def acolite_l2r(gem,
                     del cur_data
 
                     if gc_user is None:
-                        del gc_SWIR1, gc_SWIR2
+                        del gc_SWIR1, gc_SWIR2, swir1_rhos, swir2_rhos
                     else:
-                        del gc_USER
+                        del gc_USER, gc_user_rhos
 
                     break
                     ## end select glint correction band
