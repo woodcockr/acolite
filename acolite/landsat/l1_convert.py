@@ -543,7 +543,7 @@ def l1_convert(inputfile, output = None, settings = None,
         temp_results = {}
         temp_results_pan = {}
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=setu['max_workers']) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_max_workers"]) as executor:
             results = list(executor.map(lambda args: process_band(*args), band_args))
 
         for res in results:
