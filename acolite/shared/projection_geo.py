@@ -3,9 +3,10 @@
 ## written by Quinten Vanhellemont, RBINS
 ## 2021-02-05
 ## modifications: 2021-02-11 (QV) added half pixel offset option
+import numpy as np
 
 def projection_geo(dct, xy=False, add_half_pixel=False):
-    import numpy as np
+
 
     if not add_half_pixel:
         xdim = np.linspace(dct['xrange'][0],dct['xrange'][1]-dct['pixel_size'][0],dct['xdim']).reshape(1,dct['xdim'])

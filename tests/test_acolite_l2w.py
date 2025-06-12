@@ -1,15 +1,19 @@
 # Test the Acolite L2W module
 import cProfile
+import json
 import os
 import pstats
 import tempfile
+import time
 
+import numpy as np
 import pytest
 import xarray as xr
 from memory_profiler import profile
+from utils import arrays_almost_equal
 
 import acolite as ac
-import json
+
 
 @pytest.fixture()
 def gem():
@@ -37,8 +41,8 @@ def csiro_settings_ls9():
         settings = json.load(f)
     return settings
 
-@profile
-def test_acolite_l2w_runs(gem, original_dataset_filename, csiro_settings_ls9):
+# @profile
+def test_acolite_l2w(gem, original_dataset_filename, csiro_settings_ls9):
     """
     Test the Acolite L2W module.
     """
@@ -48,16 +52,20 @@ def test_acolite_l2w_runs(gem, original_dataset_filename, csiro_settings_ls9):
     # Create a temporary directory for the output
     with tempfile.TemporaryDirectory() as temp_dir:
         # Run the Acolite L2W module
-        profiler = cProfile.Profile()
-        profiler.enable()
+        # profiler = cProfile.Profile()
+        # profiler.enable()
+        start_time = time.time()
 
         result = ac.acolite.acolite_l2w(gem, target_file=f'{temp_dir}/l2w_output.nc', settings=csiro_settings_ls9)
 
-        profiler.disable()
-        stats = pstats.Stats(profiler)
-        stats.dump_stats(f'{temp_dir}/profiler_stats_file.dat')
-        stats.strip_dirs()
-        stats.print_stats(5).sort_stats('tottime')
+        elapsed_time = time.time() - start_time
+        print(f"execution time: {elapsed_time:.4f} seconds")
+
+        # profiler.disable()
+        # stats = pstats.Stats(profiler)
+        # stats.dump_stats(f'{temp_dir}/profiler_stats_file.dat')
+        # stats.strip_dirs()
+        # stats.print_stats(5).sort_stats('tottime')
 
         # Check if the result is as expected
         assert result is not None, "Acolite L2W module did not return a result."
@@ -72,6 +80,6 @@ def test_acolite_l2w_runs(gem, original_dataset_filename, csiro_settings_ls9):
 
         # Check if the datasets are equal
         for k in original_noatts.data_vars:
-            print(f"{k}, result: {result_noatts[k].equals(original_noatts[k])}")
+            assert arrays_almost_equal(result_noatts[k], original_noatts[k]), f"Arrays differ for variable {k}!"
 
         assert result_dataset.equals(original_dataset), "Output dataset does not equal the original dataset."
