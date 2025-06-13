@@ -60,5 +60,10 @@ __pycache__/
 
 .DS_Store
 
+
 .vscode/
 tests/data/acolite_run_*l2r_settings.txt
+# Profiling output files
+*.png
+*.dat
+*.svg

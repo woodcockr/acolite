@@ -70,7 +70,7 @@ def test_acolite_l2r(test_input):
         # profiler.enable()
         start_time = time.time()
 
-        result = ac.acolite.acolite_l2r(gem, output=temp_dir, settings=csiro_settings_ls9)
+        result = ac.acolite.acolite_l2r(gem, output=temp_dir, settings=csiro_settings_ls9, return_gem=False) # return_gem=False for test - in full run is csiro_settings_ls9['l2r_return_gem'])
 
         elapsed_time = time.time() - start_time
         print(f"execution time: {elapsed_time:.4f} seconds")
