@@ -28,6 +28,10 @@ def acolite_l2w(gem, output = None, settings = None,
         gemf = '{}'.format(gem)
         gem = ac.gem.gem(gem)
         close = True
+    else:
+        if not isinstance(gem, ac.gem.gem):
+            raise TypeError('gem must be a gem object or a file name')
+
     gemf = gem.file
 
     ## combine default and user defined settings
@@ -180,7 +184,7 @@ def acolite_l2w(gem, output = None, settings = None,
         if setu['dem_shadow_mask']: flag_value += 2**setu['flag_exponent_dem_shadow']
 
     ## compute flags
-    l2_flags = ac.acolite.acolite_flags(gem)
+    l2_flags = ac.acolite.acolite_flags(gem, settings=settings)
 
     ## read parameters that are copied from L2R -> L2W
     copied_parameters = ac.acolite.settings.read_list(ac.config['data_dir']+'/ACOLITE/l2w_parameters_copy.txt')
