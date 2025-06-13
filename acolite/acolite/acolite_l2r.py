@@ -894,6 +894,8 @@ def acolite_l2r(gem,
 
     ## setup output file
     ofile = None
+    copy_rhot = False
+    gemo = None
     if output_file:
         if target_file is None:
             ofile = gemf.replace('_L1R', '_L2R')
@@ -922,7 +924,6 @@ def acolite_l2r(gem,
                 gemo.gatts[k] = setu[k]
 
         ## copy datasets from inputfile
-        copy_rhot = False
         copy_datasets = []
         if setu['copy_datasets'] is not None: copy_datasets += setu['copy_datasets']
         if setu['output_bt']: copy_datasets += [ds for ds in gem.datasets if ds[0:2] == 'bt']
@@ -1649,7 +1650,7 @@ def acolite_l2r(gem,
                     break
                     ## end select glint correction band
 
-                ## WIP glint correction per band - remaining bands
+                ## glint correction per band - remaining bands
                 # Create dictionary of band data - this will load the data so the parallel loop can work as well.
                 band_data_dict = {}
                 for b in gemo.bands:
@@ -1664,9 +1665,19 @@ def acolite_l2r(gem,
                     T_USER, T_SWIR1, T_SWIR2, setu, segment_data, rhog_ref, use_swir1, gemo
                 )
 
-                # Write the outputs
-                for ds in gemo.datasets: # write out everything in gemo.data_mem
-                    gemo.write_ds(ds)
+                # Write the outputs if we are not returning a gem object otherwise skip this for performance
+
+                for ds in gemo.datasets:
+                    if not return_gem:
+                        # write out everything in gemo.data_mem
+                        gemo.write_ds(ds)
+                    elif ds not in gemo.data_mem:
+                        # load anything this is missing from gemo.data_mem
+                        # WIP This should be refactored to make it unnecessary by fixing earlier code that nukes it
+                        gemo.data(ds, store=True, return_data=False)
+                        # WIP why doesn't gem.data update the datasets?
+                        if ds not in gemo.datasets:
+                            gemo.datasets.append(ds)
 
                 del sub_gc, rhog_ref
                 if gc_user is not None:
@@ -1679,7 +1690,7 @@ def acolite_l2r(gem,
     ## alternative glint correction
     if (ac_opt == 'dsf') & (setu['dsf_residual_glint_correction']) & (setu['dsf_aot_estimate'] in ['fixed', 'segmented']) &\
        (setu['dsf_residual_glint_correction_method']=='alternative'):
-
+        raise NotImplementedError('Alternative glint correction not implemented in acolite-mp yet')
         ## reference aot and wind speed
         if setu['dsf_aot_estimate'] == 'fixed':
             gc_aot = max(0.1, gemo.gatts['ac_aot_550'])
@@ -1810,7 +1821,19 @@ def acolite_l2r(gem,
     ## end alternative glint correction
 
     ## compute contrabands
-    if setu['compute_contrabands']: ac.parameters.castagna.contraband(gemo)
+    if setu['compute_contrabands']:
+        ds = ac.parameters.castagna.contraband(gemo)
+        if ds is not None:
+            if not return_gem:
+                # write out everything in gemo.data_mem
+                gemo.write_ds(ds)
+            elif ds not in gemo.data_mem:
+                # load anything this is missing from gemo.data_mem
+                # WIP This should be refactored to make it unnecessary by fixing earlier code that nukes it
+                gemo.data(ds, store=True, return_data=False)
+                # WIP why doesn't gem.data update the datasets?
+                if ds not in gemo.datasets:
+                    gemo.datasets.append(ds)
 
     ## clear aot results
     aot_lut, aot_sel = None, None
