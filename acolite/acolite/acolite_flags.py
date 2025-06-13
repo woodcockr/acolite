@@ -62,7 +62,7 @@ def compute_cirrus_mask(gem, rhot_ds, rhot_waves, setu):
             print('No suitable band found for cirrus masking.')
     return flags
 
-def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, return_flags_dataset=True):
+def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, return_flags_dataset=True, settings = None):
 
 
     ## read gem file if NetCDF
@@ -80,6 +80,12 @@ def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, ret
     for k in setd:
         if k not in ac.settings['user']: setu[k] = setd[k]
     ## end set sensor specific defaults
+
+    ## additional run settings
+    if settings is not None:
+        settings = ac.acolite.settings.parse(settings)
+        for k in settings: setu[k] = settings[k]
+    ## end additional run settings
 
     if setu['verbosity'] > 0: print('Running ACOLITE flagging function for {}.'.format(gemf))
 
@@ -110,50 +116,8 @@ def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, ret
         flags = gem.data(flags_name)
 
     ## compute flags
-    ####
-    ## non water/swir threshold
-    # if setu['verbosity'] > 3: print('Computing non water threshold mask.')
-    # cidx,cwave = ac.shared.closest_idx(rhot_waves, setu['l2w_mask_wave'])
-    # ## use M bands for masking
-    # if ('VIIRS' in gem.gatts['sensor']) & (setu['viirs_mask_mband']):
-    #     rhot_waves_m = [int(ds.split('_')[-1]) for ds in rhot_ds if 'M' in ds]
-    #     cidx,cwave = ac.shared.closest_idx(rhot_waves_m, setu['l2w_mask_wave'])
-    # cur_par = 'rhot_{}'.format(cwave)
-    # cur_par = [ds for ds in rhot_ds if ('{:.0f}'.format(cwave) in ds)][0]
-    # if setu['verbosity'] > 3: print('Computing non water threshold mask from {} > {}.'.format(cur_par, setu['l2w_mask_threshold']))
-    # cur_data = gem.data(cur_par)
-    # if setu['l2w_mask_smooth']:
-    #     cur_data = ac.shared.fillnan(cur_data)
-    #     cur_data = scipy.ndimage.gaussian_filter(cur_data, setu['l2w_mask_smooth_sigma'], mode='reflect')
-    # cur_mask = cur_data > setu['l2w_mask_threshold']
-    # cur_data = None
-    # flags = cur_mask.astype(np.int32)*(2**setu['flag_exponent_swir'])
-    # cur_mask = None
-    # ## end non water/swir threshold
-    ####
-
-    ####
-    ## cirrus masking
-    # if setu['verbosity'] > 3: print('Computing cirrus mask.')
-    # cidx,cwave = ac.shared.closest_idx(rhot_waves, setu['l2w_mask_cirrus_wave'])
-    # if np.abs(cwave - setu['l2w_mask_cirrus_wave']) < 5:
-    #     cur_par = 'rhot_{}'.format(cwave)
-    #     cur_par = [ds for ds in rhot_ds if ('{:.0f}'.format(cwave) in ds)][0]
-
-    #     if setu['verbosity'] > 3: print('Computing cirrus mask from {} > {}.'.format(cur_par, setu['l2w_mask_cirrus_threshold']))
-    #     cur_data = gem.data(cur_par)
-    #     if setu['l2w_mask_smooth']:
-    #         cur_data = ac.shared.fillnan(cur_data)
-    #         cur_data = scipy.ndimage.gaussian_filter(cur_data, setu['l2w_mask_smooth_sigma'], mode='reflect')
-    #     cirrus_mask = cur_data > setu['l2w_mask_cirrus_threshold']
-    #     cirrus = None
-    #     flags = (flags) | (cirrus_mask.astype(np.int32)*(2**setu['flag_exponent_cirrus']))
-    #     cirrus_mask = None
-    # else:
-    #     if setu['verbosity'] > 2: print('No suitable band found for cirrus masking.')
-    ## end cirrus masking
     # Run compute_non_water_swir_mask and compute_cirrus_mask in parallel
-    with concurrent.futures.ThreadPoolExecutor() as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_max_workers"]) as executor:
         future_swir = executor.submit(compute_non_water_swir_mask, gem, rhot_ds, rhot_waves, setu)
         future_cirrus = executor.submit(compute_cirrus_mask, gem, rhot_ds, rhot_waves, setu)
         flags = future_swir.result()
@@ -197,7 +161,7 @@ def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, ret
     toa_mask = None
     outmask = None
 
-    with concurrent.futures.ThreadPoolExecutor() as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_max_workers"]) as executor:
         results = list(executor.map(toa_mask_worker, toa_args))
 
     for res in results:
@@ -265,7 +229,7 @@ def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, ret
         neg_args = [(ci, cur_par, rhos_waves, rhos_ds, setu, gem) for ci, cur_par in enumerate(rhos_ds)]
 
         neg_mask = None
-        with concurrent.futures.ThreadPoolExecutor() as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_max_workers"]) as executor:
             results = list(executor.map(neg_mask_worker, neg_args))
 
         for local_neg_mask in results:
