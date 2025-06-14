@@ -8,7 +8,7 @@ import time
 import numpy as np
 import pytest
 import xarray as xr
-from utils import arrays_almost_equal
+from utils import arrays_almost_equal, acolite_fixtures_path
 
 # from memory_profiler import profile
 import acolite as ac
@@ -49,10 +49,11 @@ def test_acolite_l2r(test_input):
     original_dataset_filename = test_input['original_dataset_filename']
     settings_file = test_input['settings']
     # Check if the original dataset file exists
-    test_dir = os.path.dirname(__file__)
-    gem = os.path.join(test_dir, "data", gem)
-    original_dataset_filename = os.path.join(test_dir, "data", original_dataset_filename)
-    settings_file = os.path.join(test_dir, "data", settings_file + ".json")
+    test_dir = acolite_fixtures_path
+    assert os.path.exists(test_dir), f"Fixtures repository {test_dir} does not exist."
+    gem = os.path.join(test_dir,  gem)
+    original_dataset_filename = os.path.join(test_dir,  original_dataset_filename)
+    settings_file = os.path.join(test_dir,  settings_file + ".json")
     assert os.path.exists(gem), f"Test Gem file {gem} does not exist."
     assert os.path.exists(original_dataset_filename), f"Original dataset file {original_dataset_filename} does not exist."
     assert os.path.exists(settings_file), f"Settings file {settings_file} does not exist."

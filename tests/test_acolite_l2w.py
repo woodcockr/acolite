@@ -10,9 +10,10 @@ import numpy as np
 import pytest
 import xarray as xr
 from memory_profiler import profile
-from utils import arrays_almost_equal
+from utils import acolite_fixtures_path, arrays_almost_equal
 
 import acolite as ac
+
 
 # For the l2w tests the L2R output from acolite-mp is used and the resulting l2w compared with the original acolite l2w output.
 @pytest.mark.parametrize(
@@ -49,10 +50,10 @@ def test_acolite_l2w(test_input):
     original_dataset_filename = test_input["original_dataset_filename"]
     settings_file = test_input["settings"]
     # Check if the original dataset file exists
-    test_dir = os.path.dirname(__file__)
-    gem = os.path.join(test_dir, "data", gem)
-    original_dataset_filename = os.path.join(test_dir, "data", original_dataset_filename)
-    settings_file = os.path.join(test_dir, "data", settings_file + ".json")
+    test_dir = acolite_fixtures_path
+    gem = os.path.join(test_dir, gem)
+    original_dataset_filename = os.path.join(test_dir, original_dataset_filename)
+    settings_file = os.path.join(test_dir, settings_file + ".json")
     assert os.path.exists(gem), f"Test Gem file {gem} does not exist."
     assert os.path.exists(original_dataset_filename), f"Original dataset file {original_dataset_filename} does not exist."
     assert os.path.exists(settings_file), f"Settings file {settings_file} does not exist."

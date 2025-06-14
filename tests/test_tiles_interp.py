@@ -1,13 +1,17 @@
-import numpy as np
 import os
-import pytest
-from acolite.shared.tiles_interp import tiles_interp
 import time
 
+import numpy as np
+import pytest
+from utils import acolite_fixtures_path
+
+from acolite.shared.tiles_interp import tiles_interp
+
+
 def test_tiles_interp_regression():
-    test_dir = os.path.dirname(__file__)
-    for name in ["aot_550"]: # WIP Fixture for romix is broken , "romix"]:
-        path = os.path.join(test_dir, "data/tiles_interp", name)
+    test_dir = acolite_fixtures_path
+    for name in ["aot_550"]:  # WIP Fixture for romix is broken , "romix"]:
+        path = os.path.join(test_dir, "tiles_interp", name)
         if not os.path.exists(path):
             raise FileNotFoundError(f"Test data directory {path} does not exist.")
         arrays = {}
@@ -19,7 +23,7 @@ def test_tiles_interp_regression():
         ynew = arrays["ynew"]
         original_znew = arrays["znew"]
 
-        #create a random data array of the same shape as the original data
+        # create a random data array of the same shape as the original data
         for i in range(5):
             random_data = np.random.rand(*data.shape)
 
@@ -61,9 +65,13 @@ def test_tiles_interp_regression():
             elapsed_time = time.time() - start_time
             print(f"random_data: interpn execution time: {elapsed_time:.4f} seconds")
 
-            assert znew_pyinterp.shape == znew_interpn.shape, f"{name}: Expected shape {znew_interpn.shape}, got {znew_pyinterp.shape}"
+            assert znew_pyinterp.shape == znew_interpn.shape, (
+                f"{name}: Expected shape {znew_interpn.shape}, got {znew_pyinterp.shape}"
+            )
             # Check if both methods produce the same output
-            assert np.allclose(znew_pyinterp, znew_interpn, rtol=1e-5, atol=1e-8, equal_nan=True), f"{name}: Pyinterp and legacy interpolation results do not match."
+            assert np.allclose(
+                znew_pyinterp, znew_interpn, rtol=1e-5, atol=1e-8, equal_nan=True
+            ), f"{name}: Pyinterp and legacy interpolation results do not match."
         # Check against the original znew
         start_time = time.time()
         znew_pyinterp = tiles_interp(
@@ -83,4 +91,6 @@ def test_tiles_interp_regression():
         )
         elapsed_time = time.time() - start_time
         print(f"{name}: pyinterp execution time: {elapsed_time:.4f} seconds")
-        assert np.allclose(znew_pyinterp, original_znew, rtol=1e-5, atol=1e-7, equal_nan=True), f"{name}: Pyinterp and original_znew interpolation results do not match."
+        assert np.allclose(
+            znew_pyinterp, original_znew, rtol=1e-5, atol=1e-7, equal_nan=True
+        ), f"{name}: Pyinterp and original_znew interpolation results do not match."

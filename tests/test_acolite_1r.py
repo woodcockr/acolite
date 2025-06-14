@@ -1,15 +1,17 @@
 # Test the Acolite landsat l1r module
 import cProfile
+import json
 import os
 import pstats
 import tempfile
+import time
 
 import pytest
 import xarray as xr
 from memory_profiler import profile
+from utils import acolite_fixtures_path
 
 import acolite as ac
-import json
 
 
 @pytest.mark.parametrize(
@@ -48,10 +50,10 @@ def test_acolite_l1r(test_input):
     original_dataset_filename = test_input["l1r_filename"]
     csiro_settings = test_input["csiro_settings"]
     # Check if the input file exists
-    test_dir = os.path.dirname(__file__)
-    input_filename = os.path.join(test_dir, "data", input_filename)
-    original_dataset_filename = os.path.join(test_dir, "data", original_dataset_filename)
-    csiro_settings = os.path.join(test_dir, "data", csiro_settings + ".json")
+    test_dir = acolite_fixtures_path
+    input_filename = os.path.join(test_dir, input_filename)
+    original_dataset_filename = os.path.join(test_dir, original_dataset_filename)
+    csiro_settings = os.path.join(test_dir, csiro_settings + ".json")
     assert os.path.exists(input_filename), f"Input file {input_filename} does not exist."
     assert os.path.exists(original_dataset_filename), f"Original dataset file {original_dataset_filename} does not exist."
     assert os.path.exists(csiro_settings), f"CSIRO settings file {csiro_settings} does not exist."
@@ -64,6 +66,7 @@ def test_acolite_l1r(test_input):
         # Run the Acolite L1R module
         # profiler = cProfile.Profile()
         # profiler.enable()
+        start_time = time.time()
         match key:
             case "landsat":
                 result, _ = ac.landsat.l1_convert(input_filename, output=f'{temp_dir}', settings=settings)
@@ -71,7 +74,8 @@ def test_acolite_l1r(test_input):
                 result, _ = ac.sentinel2.l1_convert(input_filename, output=f'{temp_dir}', settings=settings)
             case _:
                 raise ValueError(f"Unknown key {key} in fixtures.")
-
+        elapsed_time = time.time() - start_time
+        print(f"Execution time for {key}: {elapsed_time:.4f} seconds")
         # profiler.disable()
         # stats = pstats.Stats(profiler)
         # stats.dump_stats(f'{temp_dir}/profiler_stats_file.dat')
