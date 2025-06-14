@@ -424,7 +424,7 @@ def l1_convert(inputfile, output = None, settings = None,
 
                 ## use target band so we can just do the 60 metres geometry
                 if os.path.exists(target_file):
-                    with ThreadPoolExecutor(max_workers=setu["acolite-mp_max_workers"]) as executor:
+                    with ThreadPoolExecutor(max_workers=setu["acolite-mp_l1_convert_max_workers"]) as executor:
                         results = list(executor.map(
                             warp_from_source_parallel,
                             [
@@ -703,7 +703,7 @@ def l1_convert(inputfile, output = None, settings = None,
             for b in rsr_bands
         ]
 
-        with concurrent.futures.ThreadPoolExecutor() as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_l1_convert_max_workers"]) as executor:
             results = list(executor.map(lambda args: process_band_s2(*args), band_args))
 
         for res in results:
