@@ -686,7 +686,7 @@ def acolite_l2r(gem,
         else:
             return k, gem.gatts[k]
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_max_workers"]) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_l2r_max_workers"]) as executor:
         geom_mean_items = executor.map(_compute_geom_mean_worker, [(k, gem) for k in geom_ds])
         geom_mean = dict(geom_mean_items)
 
@@ -1030,7 +1030,7 @@ def acolite_l2r(gem,
                 for b in gem.bands
             ]
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_max_workers"]) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_l2r_max_workers"]) as executor:
                 results = executor.map(_process_dsf_band_wrapper, band_args)
                 for result in results:
                     if result is None:
@@ -1485,7 +1485,7 @@ def acolite_l2r(gem,
             ))
 
     # all_results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_max_workers"]) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_l2r_max_workers"]) as executor:
         _ = executor.map(_process_band_wrapper, band_args)
 
     ## glint correction
@@ -1593,7 +1593,7 @@ def acolite_l2r(gem,
                     for rhos_ds, b in wave_band_mapping
                 ]
 
-                with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_max_workers"]) as executor:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_l2r_max_workers"]) as executor:
                     results = executor.map(_glint_band_worker, args_list)
                     for result in results:
                         if 'T_USER' in result:
@@ -2594,7 +2594,7 @@ def process_glint_correction_parallel(
         )
         return
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_max_workers"]) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_l2r_max_workers"]) as executor:
         results = executor.map(_process_single_band, band_data_dict.items())
 
     return

@@ -10,7 +10,7 @@ from acolite.shared.tiles_interp import tiles_interp
 
 def test_tiles_interp_regression():
     test_dir = acolite_fixtures_path
-    for name in ["aot_550"]:  # WIP Fixture for romix is broken , "romix"]:
+    for name in ["aot_550"]:
         path = os.path.join(test_dir, "tiles_interp", name)
         if not os.path.exists(path):
             raise FileNotFoundError(f"Test data directory {path} does not exist.")

@@ -117,7 +117,7 @@ def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, ret
 
     ## compute flags
     # Run compute_non_water_swir_mask and compute_cirrus_mask in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_max_workers"]) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_flags_max_workers"]) as executor:
         future_swir = executor.submit(compute_non_water_swir_mask, gem, rhot_ds, rhot_waves, setu)
         future_cirrus = executor.submit(compute_cirrus_mask, gem, rhot_ds, rhot_waves, setu)
         flags = future_swir.result()
@@ -161,7 +161,7 @@ def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, ret
     toa_mask = None
     outmask = None
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_max_workers"]) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_flags_max_workers"]) as executor:
         results = list(executor.map(toa_mask_worker, toa_args))
 
     for res in results:
@@ -229,7 +229,7 @@ def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, ret
         neg_args = [(ci, cur_par, rhos_waves, rhos_ds, setu, gem) for ci, cur_par in enumerate(rhos_ds)]
 
         neg_mask = None
-        with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_max_workers"]) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_flags_max_workers"]) as executor:
             results = list(executor.map(neg_mask_worker, neg_args))
 
         for local_neg_mask in results:
