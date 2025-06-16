@@ -132,49 +132,44 @@ def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, ret
     if setu['verbosity'] > 3: print('Computing TOA limit mask.')
     toa_mask = None
     outmask = None
-
     # Pre-load the gem data for rhot datasets
     for ci, cur_par in enumerate(rhot_ds):
         gem.data(cur_par, store=True, return_data=False)
 
-    def toa_mask_worker(args):
-        ci, cur_par, rhot_waves, rhot_ds, setu, gem = args
-        if rhot_waves[ci] < setu['l2w_mask_high_toa_wave_range'][0]:
-            return None
-        if rhot_waves[ci] > setu['l2w_mask_high_toa_wave_range'][1]:
-            return None
-        if setu['verbosity'] > 3:
-            print('Computing TOA limit mask from {} > {}.'.format(cur_par, setu['l2w_mask_high_toa_threshold']))
-        cwave = rhot_waves[ci]
-        cur_par = [ds for ds in rhot_ds if ('{:.0f}'.format(cwave) in ds)][0]
-        cur_data = gem.data_mem[cur_par]
-        local_outmask = np.isnan(cur_data)
-        if setu['l2w_mask_smooth']:
-            cur_data = ac.shared.fillnan(cur_data)
-            cur_data = scipy.ndimage.gaussian_filter(cur_data, setu['l2w_mask_smooth_sigma'], mode='reflect')
-        local_toa_mask = cur_data > setu['l2w_mask_high_toa_threshold']
-        return local_outmask, local_toa_mask
-
     # Prepare arguments for parallel execution
-    toa_args = [(ci, cur_par, rhot_waves, rhot_ds, setu, gem) for ci, cur_par in enumerate(rhot_ds)]
+    toa_args = [(ci, cur_par, rhot_waves, setu) for ci, cur_par in enumerate(rhot_ds)]
 
     toa_mask = None
     outmask = None
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_flags_max_workers"]) as executor:
-        results = list(executor.map(toa_mask_worker, toa_args))
-
-    for res in results:
-        if res is None:
-            continue
-        local_outmask, local_toa_mask = res
-        if outmask is None:
-            outmask = np.zeros(local_outmask.shape).astype(bool)
-        if toa_mask is None:
-            toa_mask = np.zeros(local_toa_mask.shape).astype(bool)
-        outmask = outmask | local_outmask
-        toa_mask = toa_mask | local_toa_mask
-
+        futures = []
+        for ci, cur_par, rhot_waves, setu in toa_args:
+            futures.append(executor.submit(toa_mask_worker, ci, cur_par, rhot_waves, gem.data_mem[cur_par], setu['l2w_mask_high_toa_wave_range'], setu['l2w_mask_high_toa_threshold'], setu['l2w_mask_smooth'], setu['l2w_mask_smooth_sigma'], setu['verbosity']))
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            if result is None:
+                continue
+            local_outmask, local_toa_mask = result
+            if outmask is None:
+                outmask = np.zeros(local_outmask.shape).astype(bool)
+            if toa_mask is None:
+                toa_mask = np.zeros(local_toa_mask.shape).astype(bool)
+            outmask = outmask | local_outmask
+            toa_mask = toa_mask | local_toa_mask
+            del local_outmask, local_toa_mask, result
+        # results = list(executor.map(toa_mask_worker, toa_args))
+    # for res in results:
+    #     if res is None:
+    #         continue
+    #     local_outmask, local_toa_mask = res
+    #     if outmask is None:
+    #         outmask = np.zeros(local_outmask.shape).astype(bool)
+    #     if toa_mask is None:
+    #         toa_mask = np.zeros(local_toa_mask.shape).astype(bool)
+    #     outmask = outmask | local_outmask
+    #     toa_mask = toa_mask | local_toa_mask
+    # del results
     flags = (flags) | (toa_mask.astype(np.int32)*(2**setu['flag_exponent_toa']))
     toa_mask = None
     flags = (flags) | (outmask.astype(np.int32)*(2**setu['flag_exponent_outofscene']))
@@ -238,10 +233,10 @@ def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, ret
             if neg_mask is None:
                 neg_mask = np.zeros(local_neg_mask.shape).astype(bool)
             neg_mask = neg_mask | local_neg_mask
+        del results
 
         flags = (flags) | (neg_mask.astype(np.int32)*(2**setu['flag_exponent_negative']))
         neg_mask = None
-
 
         # neg_mask = None
         # for ci, cur_par in enumerate(rhos_ds):
@@ -302,3 +297,17 @@ def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, ret
     if (return_flags_dataset): return(flags)
 
     return(gem)
+
+def toa_mask_worker(ci, cur_par, rhot_waves, cur_data, l2w_mask_high_toa_wave_range, l2w_mask_high_toa_threshold, l2w_mask_smooth, l2w_mask_smooth_sigma, verbosity):
+    if rhot_waves[ci] < l2w_mask_high_toa_wave_range[0]:
+        return None
+    if rhot_waves[ci] > l2w_mask_high_toa_wave_range[1]:
+        return None
+    if verbosity > 3:
+        print(f'Computing TOA limit mask from {cur_par} > {l2w_mask_high_toa_threshold}.')
+    local_outmask = np.isnan(cur_data)
+    if l2w_mask_smooth:
+        cur_data = ac.shared.fillnan(cur_data)
+        cur_data = scipy.ndimage.gaussian_filter(cur_data, l2w_mask_smooth_sigma, mode='reflect')
+    local_toa_mask = cur_data > l2w_mask_high_toa_threshold
+    return local_outmask, local_toa_mask
