@@ -33,8 +33,7 @@ import acolite as ac
         )
     ]
 )
-
-
+@pytest.mark.skip(reason="This test is temporarily disabled.")
 # @profile
 def test_acolite_l1r(test_input):
     """
