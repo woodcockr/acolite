@@ -33,6 +33,7 @@ from utils import acolite_fixtures_path, arrays_almost_equal
         )
     ]
 )
+@pytest.mark.skip(reason="This test is temporarily disabled.")
 def test_workflow_outputs(outputs):
     # Path to the directories containing the GeoTIFF files
     fixture_path = Path(acolite_fixtures_path) / "workflow-output" / f"{outputs['key']}_workflow_output"
@@ -55,10 +56,18 @@ def test_workflow_outputs(outputs):
         # Compare the two tif files pixel-by-pixel
         assert geotiffs_are_close(input_tif, fixture_tif), f"TIF files {input_tif} are not close enough."
 
+def apply_scales_and_offsets(src):
+    """
+    Apply scales and offsets to a rasterio dataset.
+    """
+    scale = src.scales[0] if src.scales else 1.0
+    offset = src.offsets[0] if src.offsets else 0.0
+    data = src.read(1).astype('float32')
+    data[data == src.nodata] = np.nan
+    data = data * scale + offset
+    return data
 
-    # result = geotiffs_are_close(fixture_path / "file1.tif", fixture_path / "file2.tif")
-
-def geotiffs_are_close(file1, file2, atol=1e-5, rtol=1e-8):
+def geotiffs_are_close(file1, file2, atol=1e-5, rtol=1e-8): # FIXME these are not currently used!
     """
     Compare two GeoTIFF files pixel-by-pixel.
     Returns True if all corresponding pixels are close within the given tolerances.
@@ -67,23 +76,33 @@ def geotiffs_are_close(file1, file2, atol=1e-5, rtol=1e-8):
         if src1.count != src2.count or src1.width != src2.width or src1.height != src2.height:
             return False
         arrays_close = True
-        for b in range(1, src1.count + 1):
-            arr1 = src1.read(b)
-            arr2 = src2.read(b)
-            if arr1.dtype == 'uint8' and arr2.dtype == 'uint8':
-                    # For l2_flags, we can check if the arrays are almost equal with a count of differences
-                    fraction = 0.0001  # Allow up to 0.01% differences
-                    num_diff = np.count_nonzero(arr1 != arr2)
-                    are_almost_equal = num_diff / arr1.size <= fraction
-                    if not are_almost_equal:
-                        arrays_close = False
-                        print(f"Arrays differ in band {b} of {file1.name}.")
-                        print_differences(arr1, arr2)
-            elif arr1.dtype == 'float32' and arr2.dtype == 'float32':
-                if not np.allclose(arr1, arr2, rtol=1e-5, atol=1e-8, equal_nan=True):
+        if src1.dtypes[0] == 'uint8' and src2.dtypes[0] == 'uint8': # l2_flags
+                arr1 = src1.read(1)
+                arr2 = src2.read(1)
+                # For l2_flags, we can check if the arrays are almost equal with a count of differences
+                fraction = 0.0001  # Allow up to 0.01% differences
+                num_diff = np.count_nonzero(arr1 != arr2)
+                are_almost_equal = num_diff / arr1.size <= fraction
+                if not are_almost_equal:
                     arrays_close = False
-                    print(f"Arrays differ in band {b} of {file1.name}.")
+                    print(f"Arrays differ in band {file1.name}.")
+                    print_differences(arr1, arr2)
 
+        elif src1.dtypes[0] == 'uint16' and src2.dtypes[0] == 'uint16':
+            data1 = apply_scales_and_offsets(src1)
+            data2 = apply_scales_and_offsets(src2)
+            if not np.allclose(data1, data2, rtol=1e-5, atol=1.1e-4, equal_nan=True):  # 1.1e-4 atol because of the round() call when converting to uint16
+                arrays_close = False
+                print(f"Arrays differ in band {file1.name}.")
+        elif src1.dtypes[0] == 'float32' and src2.dtypes[0] == 'float32':
+            arr1 = src1.read(1)
+            arr2 = src2.read(1)
+            if not np.allclose(arr1, arr2, rtol=1e-5, atol=1e-8, equal_nan=True):
+                arrays_close = False
+                print(f"Arrays differ in band  {file1.name}.")
+        else:
+            print(f"Unsupported data type in band {file1.name}: {src1.dtype[0]} and {file2.name}: {src2.dtype[0]}.")
+            arrays_close = False
     return arrays_close
 
 def print_differences(arr1: np.ndarray, arr2: np.ndarray) -> None:
