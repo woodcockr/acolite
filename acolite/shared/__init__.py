@@ -47,7 +47,7 @@ from .distance_in_ll import *
 
 from .distance_se import *
 from .fillnan import *
-from .tiles_interp import *
+from .tiles_interp import tiles_interp
 from .intercept import *
 
 from .import_config import *

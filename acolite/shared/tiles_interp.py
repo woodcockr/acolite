@@ -8,11 +8,35 @@
 ##                2021-02-11 (QV) added smooth keyword,  default to nearest
 ##                2024-04-18 (QV) new version using interpn, added option to use RGI
 import numpy as np
-from scipy.interpolate import interpn, RegularGridInterpolator
+import pyinterp
+import pyinterp.backends.xarray
+import xarray as xr
+from scipy.interpolate import RegularGridInterpolator, interpn
 from scipy.ndimage import uniform_filter
+
 import acolite as ac
 
-def tiles_interp(data, xnew, ynew, smooth = False, kern_size=2, method='nearest', mask = None,
+def tiles_interp(*args, interpolator='interpn', **kwargs):
+    """
+    Wrapper function to select interpolation method.
+
+    Parameters:
+        interpolator (str or callable): 'interpn', 'pyinterp', or a custom function.
+        *args, **kwargs: Arguments passed to the interpolation function.
+
+    Returns:
+        Interpolated result from the selected function.
+    """
+    if callable(interpolator):
+        return interpolator(*args, **kwargs)
+    elif interpolator == 'interpn':
+        return tiles_interpn(*args, **kwargs)
+    elif interpolator == 'pyinterp':
+        return tiles_pyinterp(*args, **kwargs)
+    else:
+        raise ValueError(f"Unknown interpolator: {interpolator}")
+
+def tiles_interpn(data, xnew, ynew, smooth = False, kern_size=2, method='nearest', mask = None,
                  target_mask = None, target_mask_full = False, fill_nan = True, dtype = 'float32', use_rgi = False):
 
     if mask is not None: data[mask] = np.nan
@@ -56,3 +80,64 @@ def tiles_interp(data, xnew, ynew, smooth = False, kern_size=2, method='nearest'
     ## to convert data type - scipy always returns float64
     if dtype is not None: znew = znew.astype(np.dtype(dtype))
     return(znew)
+
+def tiles_pyinterp(data, xnew, ynew, smooth=False, kern_size=2, method='nearest', mask=None,
+                 target_mask=None, target_mask_full=False, fill_nan=True, dtype='float32', use_rgi=False):
+    if mask is not None:
+        data[mask] = np.nan
+
+    # Fill nans with closest value
+    if fill_nan:
+        cur_data = ac.shared.fillnan(data)
+    else:
+        cur_data = data.copy()
+
+    if smooth:
+        cur_data = uniform_filter(cur_data, size=kern_size)
+
+    dim = cur_data.shape
+    x = np.arange(0., dim[1], 1)
+    y = np.arange(0., dim[0], 1)
+
+    # Interpolation method mapping
+    if method not in ['nearest', 'linear']:
+        raise ValueError("Method must be either 'nearest' or 'linear'.")
+    if method == 'nearest':
+        interpolator = 'nearest'
+    elif method == 'linear':
+        interpolator = 'bilinear'
+    else:
+        raise ValueError(f"Unsupported interpolation method: {method}")
+
+    # Prepare query points
+    if target_mask is not None:
+        vd = np.where(target_mask)
+        xi = xnew[vd[1]]
+        yi = ynew[vd[0]]
+    else:
+        xi, yi = np.meshgrid(xnew, ynew)
+        xi = xi.ravel()
+        yi = yi.ravel()
+
+    # Set up xarray DataArray
+    da = xr.DataArray(cur_data, coords=[y, x], dims=["y", "x"])
+    ## set up interpolator
+    grid = pyinterp.backends.xarray.Grid2D(da, geodetic=False)
+
+    # Interpolate
+    znew = grid.bivariate(coords={
+        'x': xi,
+        'y': yi
+        }, interpolator=interpolator)
+
+    # Reshape output
+    if target_mask is not None and target_mask_full:
+        out = np.full((len(ynew), len(xnew)), np.nan, dtype=dtype)
+        out[vd] = znew
+        znew = out
+    elif target_mask is None:
+        znew = znew.reshape((len(ynew), len(xnew)))
+
+    if dtype is not None:
+        znew = znew.astype(np.dtype(dtype))
+    return znew

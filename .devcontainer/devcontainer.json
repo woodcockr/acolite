@@ -7,10 +7,9 @@
 	"shutdownAction": "stopCompose",
 	"workspaceFolder": "/home/vscode/acolite-mp",
 	"remoteUser": "vscode",
-//   "mounts": [
-//     "source=~/.aws,target=/home/vscode/.aws,type=bind,consistency=cached",
-// 		"source=~/.easi-workflows-auth.conf,target=/home/vscode/.easi-workflows-auth.conf,type=bind,consistency=cached"
-// ],
+  "mounts": [
+		"source=~/dev/aquawatch/acolite_workflow/acolite-mp-fixtures,target=/home/vscode/acolite-mp-fixtures,type=bind,consistency=cached",
+],
 "customizations": {
 	"vscode": {
 		"extensions": [

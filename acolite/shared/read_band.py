@@ -102,7 +102,8 @@ def read_band(file, idx = None, warp_to=None, warp_alg = 'near', # 'cubic', 'bil
                             outputBounds = outputBounds, outputBoundsSRS = outputBoundsSRS,
                             dstSRS=dstSRS, targetAlignedPixels = targetAlignedPixels,
                             rpc = rpc, transformerOptions = transformerOptions,
-                            format='VRT', resampleAlg=warp_alg)
+                            format='VRT', resampleAlg=warp_alg,
+                            multithread=True)
             if idx is not None:
                 data =  ds.GetRasterBand(idx).ReadAsArray()
             else:

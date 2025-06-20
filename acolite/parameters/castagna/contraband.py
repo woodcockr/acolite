@@ -6,6 +6,15 @@
 ## 2022-06-21
 ## modifications: 2023-03-05 (QV) renamed from orange and added other contrabands for L7 and Pléiades
 ##
+# WIP refactor this duplicate from acolite_l2r when replacing the gem object
+def to_gem_mem(gem, ds_name, data, ds_att):
+    """
+    Helper to write outputs from _process_surface_reflectance_band to gem data_mem variables.
+    """
+    gem.data_mem[ds_name] = data
+    gem.data_att[ds_name] = ds_att
+    if ds_name not in gem.datasets:
+        gem.datasets.append(ds_name)
 
 def contraband(gem, verbosity=5):
     import acolite as ac
@@ -68,9 +77,13 @@ def contraband(gem, verbosity=5):
                         cb_data = gem.data(datasets[ii])*float(cb_cfg['pf_{}'.format(b.lower())][0])
                     else:
                         cb_data += gem.data(datasets[ii])*float(cb_cfg['msf_{}'.format(b.lower())][ii-1])
-                gem.write(cb['rhos_ds'], cb_data, ds_att = cb)
-                cb_data = None
-                cb = None
+                # for acolite-mp return this so an in memory gem can be created. gem.write overwrites the in memory gem.datasets otherwise
+                # gem.write(cb['rhos_ds'], cb_data, ds_att = cb)
+                to_gem_mem(gem, cb['rhos_ds'], cb_data, ds_att=cb)
+
+                return cb['rhos_ds']
         ## end contraband
     else:
         print('No contrabands configured for {}.'.format(gem.gatts['sensor']))
+    return None
+

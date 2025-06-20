@@ -16,6 +16,22 @@
 ##                2025-02-02 (QV) removed percentiles
 ##                2025-02-04 (QV) improved settings handling
 ##                2025-02-10 (QV) cleaned up settings use, output naming
+import concurrent.futures
+import glob
+import os
+import sys
+import time
+
+import dateutil.parser
+import numpy as np
+import scipy.ndimage
+from osgeo import gdal, ogr, osr
+
+import acolite as ac
+from concurrent.futures import ThreadPoolExecutor
+
+def warp_from_source_parallel(args):
+    return ac.shared.warp_from_source(*args)
 
 def l1_convert(inputfile, output = None, settings = None,
                 check_sensor = True,
@@ -24,11 +40,6 @@ def l1_convert(inputfile, output = None, settings = None,
                 geometry_format='GeoTIFF', ## for gpt geometry
                 ):
 
-    import sys, os, glob, dateutil.parser, time
-    from osgeo import ogr,osr,gdal
-    import acolite as ac
-    import scipy.ndimage
-    import numpy as np
     t0 = time.time()
 
     ## get run settings
@@ -39,6 +50,10 @@ def l1_convert(inputfile, output = None, settings = None,
         settings = ac.acolite.settings.parse(settings)
         for k in settings: setu[k] = settings[k]
     ## end additional run settings
+
+    interp_method = "interpn"
+    if setu["acolite-mp_tiles_interpolator"] == "pyinterp":
+        interp_method = "pyinterp"
 
     verbosity = setu['verbosity']
 
@@ -292,6 +307,7 @@ def l1_convert(inputfile, output = None, settings = None,
             ofile_aux_new = True
 
         ## if we are clipping to a given polygon get the clip_mask here
+        clip_mask = None
         if setu['polygon_clip']:
             clip_mask = ac.shared.polygon_crop(dct_prj, setu['polygon'], return_sub=False)
             clip_mask = clip_mask.astype(bool) == False
@@ -339,15 +355,15 @@ def l1_convert(inputfile, output = None, settings = None,
                 g = None
                 xnew = np.linspace(0, grmeta['VIEW']['Average_View_Zenith'].shape[1]-1, int(xSrc))
                 ynew = np.linspace(0, grmeta['VIEW']['Average_View_Zenith'].shape[0]-1, int(ySrc))
-                sza = ac.shared.tiles_interp(grmeta['SUN']['Zenith'], xnew, ynew, smooth=False, method='linear')
-                saa = ac.shared.tiles_interp(grmeta['SUN']['Azimuth'], xnew, ynew, smooth=False, method='linear')
+                sza = ac.shared.tiles_interp(grmeta['SUN']['Zenith'], xnew, ynew, smooth=False, method='linear', interpolator=interp_method)
+                saa = ac.shared.tiles_interp(grmeta['SUN']['Azimuth'], xnew, ynew, smooth=False, method='linear', interpolator=interp_method)
 
                 ## default s2 5x5 km grids
                 if setu['geometry_type'] == 'grids':
                     #xnew = np.linspace(0, grmeta['VIEW']['Average_View_Zenith'].shape[1]-1, int(global_dims[1]))
                     #ynew = np.linspace(0, grmeta['VIEW']['Average_View_Zenith'].shape[0]-1, int(global_dims[0]))
-                    vza = ac.shared.tiles_interp(grmeta['VIEW']['Average_View_Zenith'], xnew, ynew, smooth=False, method='nearest')
-                    vaa = ac.shared.tiles_interp(grmeta['VIEW']['Average_View_Azimuth'], xnew, ynew, smooth=False, method='nearest')
+                    vza = ac.shared.tiles_interp(grmeta['VIEW']['Average_View_Zenith'], xnew, ynew, smooth=False, method='nearest', interpolator=interp_method)
+                    vaa = ac.shared.tiles_interp(grmeta['VIEW']['Average_View_Azimuth'], xnew, ynew, smooth=False, method='nearest', interpolator=interp_method)
 
                 ## use s2 5x5 km grids with detector footprint interpolation
                 if setu['geometry_type'] == 'grids_footprint':
@@ -402,16 +418,23 @@ def l1_convert(inputfile, output = None, settings = None,
                             det_mask = dfoo==bv
                             ## add +1 to xnew and ynew since we are not cropping the extended grid
                             vza[det_mask] = ac.shared.tiles_interp(ave_vza, xnew+1, ynew+1, smooth=False, fill_nan=True,
-                                                          target_mask = det_mask, target_mask_full=False, method='linear')
+                                                          target_mask = det_mask, target_mask_full=False, method='linear', interpolator=interp_method)
                             vaa[det_mask] = ac.shared.tiles_interp(ave_vaa, xnew+1, ynew+1, smooth=False, fill_nan=True,
-                                                          target_mask = det_mask, target_mask_full=False, method='linear')
+                                                          target_mask = det_mask, target_mask_full=False, method='linear', interpolator=interp_method)
 
                 ## use target band so we can just do the 60 metres geometry
                 if os.path.exists(target_file):
-                    sza = ac.shared.warp_from_source(target_file, dct_prj, sza, warp_to=warp_to) # alt (dct, dct_prj, sza)
-                    saa = ac.shared.warp_from_source(target_file, dct_prj, saa, warp_to=warp_to)
-                    vza = ac.shared.warp_from_source(target_file, dct_prj, vza, warp_to=warp_to)
-                    vaa = ac.shared.warp_from_source(target_file, dct_prj, vaa, warp_to=warp_to)
+                    with ThreadPoolExecutor(max_workers=setu["acolite-mp_l1_convert_max_workers"]) as executor:
+                        results = list(executor.map(
+                            warp_from_source_parallel,
+                            [
+                                (target_file, dct_prj, sza, warp_to),
+                                (target_file, dct_prj, saa, warp_to),
+                                (target_file, dct_prj, vza, warp_to),
+                                (target_file, dct_prj, vaa, warp_to),
+                            ]
+                        ))
+                    sza, saa, vza, vaa = results
                     mask = (vaa == 0) * (vza == 0) * (saa == 0) * (sza == 0)
                 else:
                     print('Could not access {}'.format(target_file))
@@ -494,12 +517,12 @@ def l1_convert(inputfile, output = None, settings = None,
                             ## add +1 to xnew and ynew since we are not cropping the extended grid
                             vza_tmp = vza_all[:,:, bi]
                             vza_tmp[det_mask] = ac.shared.tiles_interp(vza_grid[:,:,bi], xnew+1, ynew+1, smooth=False, fill_nan=True,
-                                                                          target_mask = det_mask, target_mask_full=False, method='linear')
+                                                                          target_mask = det_mask, target_mask_full=False, method='linear', interpolator=interp_method)
                             vza_all[:,:, bi] = vza_tmp
 
                             vaa_tmp = vaa_all[:,:, bi]
                             vaa_tmp[det_mask] = ac.shared.tiles_interp(vaa_grid[:,:,bi], xnew+1, ynew+1, smooth=False, fill_nan=True,
-                                                                          target_mask = det_mask, target_mask_full=False, method='linear')
+                                                                          target_mask = det_mask, target_mask_full=False, method='linear', interpolator=interp_method)
                             vaa_all[:,:, bi] = vaa_tmp
 
             elif setu['geometry_type'] == 'gpt': ## use snap gpt to get nicer angles
@@ -670,36 +693,26 @@ def l1_convert(inputfile, output = None, settings = None,
             for Bn in band_data['RADIO_ADD_OFFSET']:
                 band_data['RADIO_ADD_OFFSET'][Bn] = float(band_data['RADIO_ADD_OFFSET'][Bn])
         if verbosity > 1: print('Converting bands')
-        for bi, b in enumerate(rsr_bands):
-            Bn = 'B{}'.format(b)
-            if Bn not in safe_files[granule]: continue
-            if os.path.exists(safe_files[granule][Bn]['path']):
-                if b in waves_names:
-                    data = ac.shared.read_band(safe_files[granule][Bn]['path'], sub=sub, warp_to=warp_to)
-                    data_mask = data == nodata
-                    if setu['s2_dilate_blackfill']: data_mask = scipy.ndimage.binary_dilation(data_mask, iterations=setu['s2_dilate_blackfill_iterations'])
-                    data = data.astype(np.float32)
-                    if 'RADIO_ADD_OFFSET' in band_data: data += band_data['RADIO_ADD_OFFSET'][Bn]
-                    data /= quant
-                    data[data_mask] = np.nan
-                    if (setu['polygon_clip']): data[clip_mask] = np.nan
-                    ds = 'rhot_{}'.format(waves_names[b])
-                    ds_att = {'wavelength':waves_mu[b]*1000}
 
-                    if setu['gains'] & (gains_dict is not None):
-                        ds_att['toa_gain'] = gains_dict[b]
-                        data *= ds_att['toa_gain']
-                        if verbosity > 1: print('Converting bands: Applied TOA gain {} to {}'.format(ds_att['toa_gain'], ds))
-                    if setu['offsets'] & (offsets_dict is not None):
-                        ds_att['toa_offset'] = offsets_dict[b]
-                        data *= ds_att['toa_offset']
-                        if verbosity > 1: print('Converting bands: Applied TOA offset {} to {}'.format(ds_att['toa_gain'], ds))
+        # Prepare arguments for parallel processing
+        band_args = [
+            (
+                b, safe_files, granule, waves_names, setu, band_data, quant, nodata, clip_mask,
+                verbosity, gemo, waves_mu, gains_dict, offsets_dict, sub, warp_to
+            )
+            for b in rsr_bands
+        ]
 
-                    ## write to ms file
-                    gemo.write(ds, data, replace_nan = True, ds_att = ds_att)
-                    if verbosity > 1: print('Converting bands: Wrote {} ({})'.format(ds, data.shape))
-            else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_l1_convert_max_workers"]) as executor:
+            results = list(executor.map(lambda args: process_band_s2(*args), band_args))
+
+        for res in results:
+            if res is None:
                 continue
+            ds, data, ds_att, shape = res
+            gemo.write(ds, data, replace_nan=True, ds_att=ds_att)
+            if verbosity > 1:
+                print('Converting bands: Wrote {} ({})'.format(ds, shape))
 
         ## update attributes
         gemo.gatts = {k: gatts[k] for k in gatts}
@@ -724,3 +737,39 @@ def l1_convert(inputfile, output = None, settings = None,
         if ofile not in ofiles: ofiles.append(ofile)
 
     return(ofiles, setu)
+
+def process_band_s2(b, safe_files, granule, waves_names, setu, band_data, quant, nodata, clip_mask, verbosity, gemo, waves_mu, gains_dict, offsets_dict, sub, warp_to):
+    Bn = 'B{}'.format(b)
+    if Bn not in safe_files[granule]:
+        return None
+    if not os.path.exists(safe_files[granule][Bn]['path']):
+        return None
+    if b not in waves_names:
+        return None
+
+    data = ac.shared.read_band(safe_files[granule][Bn]['path'], sub=sub, warp_to=warp_to)
+    data_mask = data == nodata
+    if setu['s2_dilate_blackfill']:
+        data_mask = scipy.ndimage.binary_dilation(data_mask, iterations=setu['s2_dilate_blackfill_iterations'])
+    data = data.astype(np.float32)
+    if 'RADIO_ADD_OFFSET' in band_data:
+        data += band_data['RADIO_ADD_OFFSET'][Bn]
+    data /= quant
+    data[data_mask] = np.nan
+    if setu['polygon_clip']:
+        data[clip_mask] = np.nan
+    ds = 'rhot_{}'.format(waves_names[b])
+    ds_att = {'wavelength': waves_mu[b] * 1000}
+
+    if setu['gains'] and (gains_dict is not None):
+        ds_att['toa_gain'] = gains_dict[b]
+        data *= ds_att['toa_gain']
+        if verbosity > 1:
+            print('Converting bands: Applied TOA gain {} to {}'.format(ds_att['toa_gain'], ds))
+    if setu['offsets'] and (offsets_dict is not None):
+        ds_att['toa_offset'] = offsets_dict[b]
+        data *= ds_att['toa_offset']
+        if verbosity > 1:
+            print('Converting bands: Applied TOA offset {} to {}'.format(ds_att['toa_gain'], ds))
+
+    return (ds, data, ds_att, data.shape)

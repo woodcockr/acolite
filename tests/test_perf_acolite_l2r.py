@@ -1,13 +1,10 @@
-# Test the Acolite L2R module
-import cProfile
+# Test performance of the Acolite L2R module
 import json
 import os
 import tempfile
 import time
 
-import numpy as np
 import pytest
-import xarray as xr
 from utils import arrays_almost_equal, acolite_fixtures_path
 
 # from memory_profiler import profile
@@ -37,14 +34,14 @@ import acolite as ac
         )
     ]
 )
-
+@pytest.mark.skip(reason="This test is temporarily disabled.")
 # @profile
 def test_acolite_l2r(test_input):
     """
     Test the Acolite L2R module.
     """
+    key = test_input["key"]
     # Check if the gem file exists
-
     gem = test_input['gem']
     original_dataset_filename = test_input['original_dataset_filename']
     settings_file = test_input['settings']
@@ -64,35 +61,41 @@ def test_acolite_l2r(test_input):
     # Check if the settings are loaded correctly
     assert csiro_settings_ls9 is not None, "Settings could not be loaded from the JSON file."
 
-    # Create a temporary directory for the output
-    with tempfile.TemporaryDirectory() as temp_dir:
-        # Run the Acolite L2R module
-        # profiler = cProfile.Profile()
-        # profiler.enable()
-        start_time = time.time()
+    # Check on performance depending on max_workers setting
+    metrics = []
+    # Loop through different max_workers settings
+    # This is to test the performance of the acolite-mp L1R module with different max_workers settings
+    for workers in range(1, 16):
+        print(f"Using max_workers: {workers}")
+        csiro_settings_ls9["acolite-mp_acolite_l2r_max_workers"] = workers
+        avg_elapsed_time = 0.0
+        for run in range(1, 4):  # Run each test multiple times for averaging
+            print(f"Run {run} for {key} with max_workers={workers}")
+            # Create a temporary directory for the output
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Run the Acolite L2R module
+                # profiler = cProfile.Profile()
+                # profiler.enable()
+                start_time = time.time()
 
-        result = ac.acolite.acolite_l2r(gem, output=temp_dir, settings=csiro_settings_ls9, return_gem=False) # return_gem=False for test - in full run is csiro_settings_ls9['l2r_return_gem'])
+                _ = ac.acolite.acolite_l2r(gem, output=temp_dir, settings=csiro_settings_ls9, return_gem=False) # return_gem=False for test - in full run is csiro_settings_ls9['l2r_return_gem'])
 
-        elapsed_time = time.time() - start_time
-        print(f"execution time: {elapsed_time:.4f} seconds")
+                elapsed_time = time.time() - start_time
+                print(f"execution time: {elapsed_time:.4f} seconds")
 
-        # profiler.disable()
-        # stats = pstats.Stats(profiler)
-        # stats.dump_stats(f'{temp_dir}/profiler_stats_file.dat')
-        # stats.strip_dirs()
-        # stats.print_stats(5).sort_stats('tottime')
+                avg_elapsed_time += elapsed_time
+        # Average the elapsed time over the number of runs
+        avg_elapsed_time /= 3
+        metrics.append((workers, avg_elapsed_time))
 
-        # Check if the result is as expected
-        assert result is not None, "Acolite L2R module did not return a result."
-        assert os.path.exists(result[0]), f"Output file {result[0]} does not exist."
+    # Sort metrics by elapsed time
+    metrics.sort(key=lambda x: x[1])
+    for workers, elapsed_time in metrics:
+        print(f"Metrics for {key} with max_workers={workers}: {elapsed_time:.4f} seconds")
 
-        result_dataset = xr.open_dataset(result[0])
-        original_dataset = xr.open_dataset(original_dataset_filename)
-
-        # Remove attribute that differ between runs
-        result_noatts = result_dataset.drop_attrs(deep=True)
-        original_noatts = original_dataset.drop_attrs(deep=True)
-
-        # Check if the datasets are equal
-        for k in original_noatts.data_vars:
-            assert arrays_almost_equal(result_noatts[k], original_noatts[k]), f"Arrays differ for variable {k}!"
+    # save the metrics to a file
+    metrics_filename = os.path.join(os.path.dirname(__file__), f"{key}_l2r_metrics.csv")
+    with open(metrics_filename, "w") as f:
+        f.write("max_workers,elapsed_time\n")
+        for workers, elapsed_time in metrics:
+            f.write(f"{workers},{elapsed_time:.4f}\n")

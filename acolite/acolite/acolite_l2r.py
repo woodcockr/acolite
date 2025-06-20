@@ -67,13 +67,13 @@ def _process_surface_reflectance_band(
         if setu['verbosity'] > 2: print('Band {} at {} nm wavelength < 345 nm'.format(b, bands['wave_name']))
         return ## skip if below LUT range
 
+    interp_method = "interpn"
+    if setu["acolite-mp_tiles_interpolator"] == "pyinterp":
+        interp_method = "pyinterp"
+
     dsi = bands['rhot_ds']
     dso = bands['rhos_ds']
     cur_data, cur_att = data_mem[dsi], data_att[dsi]
-
-    # Store rhot if needed
-    if copy_rhot:
-        to_gem_mem(gemo, dsi, cur_data, cur_att)
 
     if bands['tt_gas'] < setu['min_tgas_rho']:
         if setu['verbosity'] > 2: print('Band {} at {} nm has tgas < min_tgas_rho ({:.2f} < {:.2f})'.format(b, bands['wave_name'], bands['tt_gas'], setu['min_tgas_rho']))
@@ -188,14 +188,14 @@ def _process_surface_reflectance_band(
         if setu['dsf_aot_estimate'] == 'tiled':
             if setu['verbosity'] > 1: print('Interpolating tiles')
             romix = ac.shared.tiles_interp(romix, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
-            target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
+            target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method)
             astot = ac.shared.tiles_interp(astot, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
-            target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
+            target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method)
             dutott = ac.shared.tiles_interp(dutott, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
-            target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
+            target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method)
             if (setu['output_ed']):
                 dtott = ac.shared.tiles_interp(dtott, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
-                                                target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
+                                                target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method)
 
         ## create full scene parameters for segmented processing
         if setu['dsf_aot_estimate'] == 'segmented':
@@ -313,9 +313,9 @@ def _process_surface_reflectance_band(
         if (setu['dsf_aot_estimate'] == 'tiled') & (use_revlut):
             if setu['verbosity'] > 1: print('Interpolating tiles for rhorc')
             rorayl_cur = ac.shared.tiles_interp(rorayl_cur, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
-                        target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
+                        target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method)
             dutotr_cur = ac.shared.tiles_interp(dutotr_cur, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
-                        target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
+                        target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method)
 
         ## write ac parameters
         if setu['dsf_write_tiled_parameters']:
@@ -381,7 +381,7 @@ def _compute_glint_reference_band_transmittance(setu, cur_data, ttot, xnew, ynew
             valid_mask = np.isfinite(cur_data)
             del cur_data
         ttot_all_b = ac.shared.tiles_interp(ttot, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
-        target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
+        target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=setu["acolite-mp_tiles_interpolator"])
     elif setu['dsf_aot_estimate'] == 'segmented':
         ttot_all_ = ttot * 1.0
         ttot_all_b = np.zeros(data_dimensions) + np.nan
@@ -418,6 +418,12 @@ def acolite_l2r(gem,
 
     ## get run/user/sensor settings
     setu = ac.acolite.settings.merge(sensor = gem.gatts['sensor'], settings = settings)
+
+    interp_method = "interpn"
+    if setu["acolite-mp_tiles_interpolator"] == "pyinterp":
+        interp_method = "pyinterp"
+
+    if setu['verbosity'] > 0: print(f'Using {interp_method} for tiles_interp')
 
     if 'runid' not in setu: setu['runid'] = time_start.strftime('%Y%m%d_%H%M%S')
 
@@ -676,9 +682,12 @@ def acolite_l2r(gem,
         else:
             return k, gem.gatts[k]
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=setu['max_workers']) as executor:
+    # with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_l2r_max_workers"]) as executor:
+    # No need to limit max_workers on this computation as memory small
+    with concurrent.futures.ThreadPoolExecutor() as executor:
         geom_mean_items = executor.map(_compute_geom_mean_worker, [(k, gem) for k in geom_ds])
         geom_mean = dict(geom_mean_items)
+        del geom_mean_items
 
     if (geom_mean['sza'] > setu['sza_limit']):
         print('Warning: SZA out of LUT range')
@@ -884,6 +893,8 @@ def acolite_l2r(gem,
 
     ## setup output file
     ofile = None
+    copy_rhot = False
+    gemo = None
     if output_file:
         if target_file is None:
             ofile = gemf.replace('_L1R', '_L2R')
@@ -912,7 +923,6 @@ def acolite_l2r(gem,
                 gemo.gatts[k] = setu[k]
 
         ## copy datasets from inputfile
-        copy_rhot = False
         copy_datasets = []
         if setu['copy_datasets'] is not None: copy_datasets += setu['copy_datasets']
         if setu['output_bt']: copy_datasets += [ds for ds in gem.datasets if ds[0:2] == 'bt']
@@ -985,8 +995,11 @@ def acolite_l2r(gem,
 
             ## run through bands to get aot
             # Ensure all gem data in memory (gem.data_mem)
-            for ds in gem.datasets:
-                gem.data(ds, store=True, return_data=False)
+            # for ds in gem.datasets:
+            #     gem.data(ds, store=True, return_data=False)
+
+            for b in gem.bands:
+                gem.data(gem.bands[b]['rhot_ds'], store=True, return_data=False)
 
             # Parallelize the per-band DSF processing loop
             aot_bands = []
@@ -1019,7 +1032,8 @@ def acolite_l2r(gem,
                 for b in gem.bands
             ]
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=setu['max_workers']) as executor:
+            # with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_l2r_max_workers"]) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_l2r_max_workers_process_dsf"]) as executor:
                 results = executor.map(_process_dsf_band_wrapper, band_args)
                 for result in results:
                     if result is None:
@@ -1029,6 +1043,7 @@ def acolite_l2r(gem,
                     aot_bands.append(b)
                     if dsf_rhod_b is not None:
                         dsf_rhod[b] = dsf_rhod_b
+                del results
 
             ## test if valid data could be extracted
             if len(aot_bands) == 0:
@@ -1374,7 +1389,7 @@ def acolite_l2r(gem,
             for sidx, segment in enumerate(segment_data):
                 aot_out[segment_data[segment]['sub']] = aot_sel[sidx]
         elif setu['dsf_aot_estimate'] == 'tiled':
-            aot_out = ac.shared.tiles_interp(aot_sel, xnew, ynew, target_mask=None, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
+            aot_out = ac.shared.tiles_interp(aot_sel, xnew, ynew, target_mask=None, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method)
         else:
             aot_out = aot_sel * 1.0
         ## write aot
@@ -1474,7 +1489,7 @@ def acolite_l2r(gem,
             ))
 
     # all_results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=setu['max_workers']) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_l2r_max_workers_process_dsf"]) as executor:
         _ = executor.map(_process_band_wrapper, band_args)
 
     ## glint correction
@@ -1582,7 +1597,7 @@ def acolite_l2r(gem,
                     for rhos_ds, b in wave_band_mapping
                 ]
 
-                with concurrent.futures.ThreadPoolExecutor(max_workers=setu['max_workers']) as executor:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_l2r_max_workers_glint_corr"]) as executor:
                     results = executor.map(_glint_band_worker, args_list)
                     for result in results:
                         if 'T_USER' in result:
@@ -1591,7 +1606,7 @@ def acolite_l2r(gem,
                             T_SWIR1 = result['T_SWIR1']
                         if 'T_SWIR2' in result:
                             T_SWIR2 = result['T_SWIR2']
-
+                    del results
                 ## swir band choice is made for first band - loop through to find it!
                 for ib, b in enumerate(gemo.bands):
                     rhos_ds = gemo.bands[b]['rhos_ds']
@@ -1639,7 +1654,7 @@ def acolite_l2r(gem,
                     break
                     ## end select glint correction band
 
-                ## WIP glint correction per band - remaining bands
+                ## glint correction per band - remaining bands
                 # Create dictionary of band data - this will load the data so the parallel loop can work as well.
                 band_data_dict = {}
                 for b in gemo.bands:
@@ -1654,9 +1669,23 @@ def acolite_l2r(gem,
                     T_USER, T_SWIR1, T_SWIR2, setu, segment_data, rhog_ref, use_swir1, gemo
                 )
 
-                # Write the outputs
-                for ds in gemo.datasets: # write out everything in gemo.data_mem
-                    gemo.write_ds(ds)
+                # Write the outputs if we are not returning a gem object otherwise skip this for performance
+                # Store rhot if needed
+                if copy_rhot:
+                    rhot_ds = [ds for ds in gem.datasets if 'rhot_' in ds]
+                    for ds in rhot_ds:
+                        to_gem_mem(gemo, ds, gem.data_mem[ds],gem.data_att[ds])
+                for ds in gemo.datasets:
+                    if not return_gem:
+                        # write out everything in gemo.data_mem
+                        gemo.write_ds(ds)
+                    elif ds not in gemo.data_mem:
+                        # load anything this is missing from gemo.data_mem
+                        # WIP This should be refactored to make it unnecessary by fixing earlier code that nukes it
+                        gemo.data(ds, store=True, return_data=False)
+                        # WIP why doesn't gem.data update the datasets?
+                        if ds not in gemo.datasets:
+                            gemo.datasets.append(ds)
 
                 del sub_gc, rhog_ref
                 if gc_user is not None:
@@ -1669,7 +1698,7 @@ def acolite_l2r(gem,
     ## alternative glint correction
     if (ac_opt == 'dsf') & (setu['dsf_residual_glint_correction']) & (setu['dsf_aot_estimate'] in ['fixed', 'segmented']) &\
        (setu['dsf_residual_glint_correction_method']=='alternative'):
-
+        raise NotImplementedError('Alternative glint correction not implemented in acolite-mp yet')
         ## reference aot and wind speed
         if setu['dsf_aot_estimate'] == 'fixed':
             gc_aot = max(0.1, gemo.gatts['ac_aot_550'])
@@ -1800,7 +1829,19 @@ def acolite_l2r(gem,
     ## end alternative glint correction
 
     ## compute contrabands
-    if setu['compute_contrabands']: ac.parameters.castagna.contraband(gemo)
+    if setu['compute_contrabands']:
+        ds = ac.parameters.castagna.contraband(gemo)
+        if ds is not None:
+            if not return_gem:
+                # write out everything in gemo.data_mem
+                gemo.write_ds(ds)
+            elif ds not in gemo.data_mem:
+                # load anything this is missing from gemo.data_mem
+                # WIP This should be refactored to make it unnecessary by fixing earlier code that nukes it
+                gemo.data(ds, store=True, return_data=False)
+                # WIP why doesn't gem.data update the datasets?
+                if ds not in gemo.datasets:
+                    gemo.datasets.append(ds)
 
     ## clear aot results
     aot_lut, aot_sel = None, None
@@ -2327,6 +2368,10 @@ def compute_transmittance(b, cur_data, ttot_all, xnew, ynew, segment_data, setu)
     """
     Compute transmittance based on AOT estimate method.
     """
+    interp_method = "interpn"
+    if setu["acolite-mp_tiles_interpolator"] == "pyinterp":
+        interp_method = "pyinterp"
+
     if setu['dsf_aot_estimate'] == 'tiled':
         if setu['slicing']:
             valid_mask = np.isfinite(cur_data)
@@ -2336,7 +2381,8 @@ def compute_transmittance(b, cur_data, ttot_all, xnew, ynew, segment_data, setu)
             target_mask_full=True,
             smooth=setu['dsf_tile_smoothing'],
             kern_size=setu['dsf_tile_smoothing_kernel_size'],
-            method=setu['dsf_tile_interp_method']
+            method=setu['dsf_tile_interp_method'],
+            interpolator=interp_method
         )
     elif setu['dsf_aot_estimate'] == 'segmented':
         ttot_all_b = compute_segmented_transmittance(b, ttot_all, segment_data)
@@ -2556,7 +2602,8 @@ def process_glint_correction_parallel(
         )
         return
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=setu['max_workers']) as executor:
-        results = executor.map(_process_single_band, band_data_dict.items())
+    with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_l2r_max_workers_glint_corr"]) as executor:
+        _ = executor.map(_process_single_band, band_data_dict.items())
+
 
     return

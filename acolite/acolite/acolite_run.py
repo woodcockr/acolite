@@ -276,7 +276,7 @@ def acolite_run(settings, inputfile=None, output=None):
                 if gatts['acolite_file_type'].startswith('L1R'):
                     ## run dsf or exp
                     if (ac.settings['run']['atmospheric_correction_method'] in ['dark_spectrum', 'exponential']):
-                        ret = ac.acolite.acolite_l2r(l1r)
+                        ret = ac.acolite.acolite_l2r(l1r, return_gem = ac.settings['run']['l2r_return_gem'])
                         if len(ret) != 2:
                             l2r = []
                         else:
@@ -299,6 +299,7 @@ def acolite_run(settings, inputfile=None, output=None):
                         l2r = [] if ret is None else ret
 
                 ## if we have multiple l2r files
+                if type(l2r) is not list: l2r = [l2r]
                 if (len(l2r) > 0):
                     if type(l2r) is not list: l2r = [l2r]
                     l2r_files+=l2r

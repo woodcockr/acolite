@@ -119,7 +119,8 @@ def warp_from_source(source, dct, data, warp_to = None, rpc_dem=None):
                         outputBounds = outputBounds, outputBoundsSRS = outputBoundsSRS,
                         dstSRS=dstSRS, targetAlignedPixels = targetAlignedPixels,
                         rpc = rpc, transformerOptions = transformerOptions,
-                        format='VRT', resampleAlg=warp_alg)
+                        format='VRT', resampleAlg=warp_alg,
+                        multithread=True)
 
         data = ds.ReadAsArray()
         ds = None
