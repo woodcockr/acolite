@@ -4,10 +4,8 @@ import os
 import tempfile
 import time
 
-import numpy as np
 import pytest
-import xarray as xr
-from utils import acolite_fixtures_path, arrays_almost_equal
+from utils import acolite_fixtures_path
 
 import acolite as ac
 
@@ -77,7 +75,7 @@ def test_acolite_l2w(test_input):
                 # profiler.enable()
                 start_time = time.time()
 
-                result = ac.acolite.acolite_l2w(gem, target_file=f'{temp_dir}/l2w_output.nc', settings=csiro_settings_ls9)
+                _ = ac.acolite.acolite_l2w(gem, target_file=f'{temp_dir}/l2w_output.nc', settings=csiro_settings_ls9)
 
                 elapsed_time = time.time() - start_time
                 print(f"execution time: {elapsed_time:.4f} seconds")

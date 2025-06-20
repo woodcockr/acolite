@@ -1,14 +1,11 @@
 # Test the Acolite landsat l1r module
-import cProfile
 import json
 import os
-import pstats
 import tempfile
 import time
 
 import pytest
 import xarray as xr
-from memory_profiler import profile
 from utils import acolite_fixtures_path
 
 import acolite as ac
@@ -94,7 +91,7 @@ def test_acolite_l1r(test_input):
         original_noatts = original_dataset.drop_attrs(deep=True)
 
         # Check if the datasets are equal
-        # WIP May need to replace this with allclose for numerical precision issues in the event of library version changes per other tests
+        # ! May need to replace this with allclose for numerical precision issues in the event of library version changes per other tests
         for k in original_noatts.data_vars:
             print(f"{k}, result: {result_noatts[k].equals(original_noatts[k])}")
 
