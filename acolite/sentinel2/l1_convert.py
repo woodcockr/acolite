@@ -355,15 +355,15 @@ def l1_convert(inputfile, output = None, settings = None,
                 g = None
                 xnew = np.linspace(0, grmeta['VIEW']['Average_View_Zenith'].shape[1]-1, int(xSrc))
                 ynew = np.linspace(0, grmeta['VIEW']['Average_View_Zenith'].shape[0]-1, int(ySrc))
-                sza = ac.shared.tiles_interp(grmeta['SUN']['Zenith'], xnew, ynew, smooth=False, method='linear', interpolator=interp_method)
-                saa = ac.shared.tiles_interp(grmeta['SUN']['Azimuth'], xnew, ynew, smooth=False, method='linear', interpolator=interp_method)
+                sza = ac.shared.tiles_interp(grmeta['SUN']['Zenith'], xnew, ynew, smooth=False, method='linear', interpolator=interp_method, num_threads=setu['acolite-mp_acolite_l2r_max_workers_process_dsf'])
+                saa = ac.shared.tiles_interp(grmeta['SUN']['Azimuth'], xnew, ynew, smooth=False, method='linear', interpolator=interp_method, num_threads=setu['acolite-mp_acolite_l2r_max_workers_process_dsf'])
 
                 ## default s2 5x5 km grids
                 if setu['geometry_type'] == 'grids':
                     #xnew = np.linspace(0, grmeta['VIEW']['Average_View_Zenith'].shape[1]-1, int(global_dims[1]))
                     #ynew = np.linspace(0, grmeta['VIEW']['Average_View_Zenith'].shape[0]-1, int(global_dims[0]))
-                    vza = ac.shared.tiles_interp(grmeta['VIEW']['Average_View_Zenith'], xnew, ynew, smooth=False, method='nearest', interpolator=interp_method)
-                    vaa = ac.shared.tiles_interp(grmeta['VIEW']['Average_View_Azimuth'], xnew, ynew, smooth=False, method='nearest', interpolator=interp_method)
+                    vza = ac.shared.tiles_interp(grmeta['VIEW']['Average_View_Zenith'], xnew, ynew, smooth=False, method='nearest', interpolator=interp_method, num_threads=setu['acolite-mp_acolite_l2r_max_workers_process_dsf'])
+                    vaa = ac.shared.tiles_interp(grmeta['VIEW']['Average_View_Azimuth'], xnew, ynew, smooth=False, method='nearest', interpolator=interp_method, num_threads=setu['acolite-mp_acolite_l2r_max_workers_process_dsf'])
 
                 ## use s2 5x5 km grids with detector footprint interpolation
                 if setu['geometry_type'] == 'grids_footprint':
@@ -418,9 +418,9 @@ def l1_convert(inputfile, output = None, settings = None,
                             det_mask = dfoo==bv
                             ## add +1 to xnew and ynew since we are not cropping the extended grid
                             vza[det_mask] = ac.shared.tiles_interp(ave_vza, xnew+1, ynew+1, smooth=False, fill_nan=True,
-                                                          target_mask = det_mask, target_mask_full=False, method='linear', interpolator=interp_method)
+                                                          target_mask = det_mask, target_mask_full=False, method='linear', interpolator=interp_method, num_threads=setu['acolite-mp_acolite_l2r_max_workers_process_dsf'])
                             vaa[det_mask] = ac.shared.tiles_interp(ave_vaa, xnew+1, ynew+1, smooth=False, fill_nan=True,
-                                                          target_mask = det_mask, target_mask_full=False, method='linear', interpolator=interp_method)
+                                                          target_mask = det_mask, target_mask_full=False, method='linear', interpolator=interp_method, num_threads=setu['acolite-mp_acolite_l2r_max_workers_process_dsf'])
 
                 ## use target band so we can just do the 60 metres geometry
                 if os.path.exists(target_file):
@@ -517,12 +517,12 @@ def l1_convert(inputfile, output = None, settings = None,
                             ## add +1 to xnew and ynew since we are not cropping the extended grid
                             vza_tmp = vza_all[:,:, bi]
                             vza_tmp[det_mask] = ac.shared.tiles_interp(vza_grid[:,:,bi], xnew+1, ynew+1, smooth=False, fill_nan=True,
-                                                                          target_mask = det_mask, target_mask_full=False, method='linear', interpolator=interp_method)
+                                                                          target_mask = det_mask, target_mask_full=False, method='linear', interpolator=interp_method, num_threads=setu['acolite-mp_acolite_l2r_max_workers_process_dsf'])
                             vza_all[:,:, bi] = vza_tmp
 
                             vaa_tmp = vaa_all[:,:, bi]
                             vaa_tmp[det_mask] = ac.shared.tiles_interp(vaa_grid[:,:,bi], xnew+1, ynew+1, smooth=False, fill_nan=True,
-                                                                          target_mask = det_mask, target_mask_full=False, method='linear', interpolator=interp_method)
+                                                                          target_mask = det_mask, target_mask_full=False, method='linear', interpolator=interp_method, num_threads=setu['acolite-mp_acolite_l2r_max_workers_process_dsf'])
                             vaa_all[:,:, bi] = vaa_tmp
 
             elif setu['geometry_type'] == 'gpt': ## use snap gpt to get nicer angles

@@ -188,14 +188,14 @@ def _process_surface_reflectance_band(
         if setu['dsf_aot_estimate'] == 'tiled':
             if setu['verbosity'] > 1: print('Interpolating tiles')
             romix = ac.shared.tiles_interp(romix, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
-            target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method)
+            target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method, num_threads=setu['acolite-mp_acolite_l2r_max_workers_process_dsf'])
             astot = ac.shared.tiles_interp(astot, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
-            target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method)
+            target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method, num_threads=setu['acolite-mp_acolite_l2r_max_workers_process_dsf'])
             dutott = ac.shared.tiles_interp(dutott, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
-            target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method)
+            target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method, num_threads=setu['acolite-mp_acolite_l2r_max_workers_process_dsf'])
             if (setu['output_ed']):
                 dtott = ac.shared.tiles_interp(dtott, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
-                                                target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method)
+                                                target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method, num_threads=setu['acolite-mp_acolite_l2r_max_workers_process_dsf'])
 
         ## create full scene parameters for segmented processing
         if setu['dsf_aot_estimate'] == 'segmented':
@@ -313,9 +313,9 @@ def _process_surface_reflectance_band(
         if (setu['dsf_aot_estimate'] == 'tiled') & (use_revlut):
             if setu['verbosity'] > 1: print('Interpolating tiles for rhorc')
             rorayl_cur = ac.shared.tiles_interp(rorayl_cur, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
-                        target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method)
+                        target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method, num_threads=setu['acolite-mp_acolite_l2r_max_workers_process_dsf'])
             dutotr_cur = ac.shared.tiles_interp(dutotr_cur, xnew, ynew, target_mask=(valid_mask if setu['slicing'] else None), \
-                        target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method)
+                        target_mask_full=True, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method, num_threads=setu['acolite-mp_acolite_l2r_max_workers_process_dsf'])
 
         ## write ac parameters
         if setu['dsf_write_tiled_parameters']:
@@ -1389,7 +1389,7 @@ def acolite_l2r(gem,
             for sidx, segment in enumerate(segment_data):
                 aot_out[segment_data[segment]['sub']] = aot_sel[sidx]
         elif setu['dsf_aot_estimate'] == 'tiled':
-            aot_out = ac.shared.tiles_interp(aot_sel, xnew, ynew, target_mask=None, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method)
+            aot_out = ac.shared.tiles_interp(aot_sel, xnew, ynew, target_mask=None, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'], interpolator=interp_method, num_threads=setu['acolite-mp_acolite_l2r_max_workers_process_dsf'])
         else:
             aot_out = aot_sel * 1.0
         ## write aot
@@ -2382,7 +2382,7 @@ def compute_transmittance(b, cur_data, ttot_all, xnew, ynew, segment_data, setu)
             smooth=setu['dsf_tile_smoothing'],
             kern_size=setu['dsf_tile_smoothing_kernel_size'],
             method=setu['dsf_tile_interp_method'],
-            interpolator=interp_method
+            interpolator=interp_method, num_threads=setu['acolite-mp_acolite_l2r_max_workers_process_dsf']
         )
     elif setu['dsf_aot_estimate'] == 'segmented':
         ttot_all_b = compute_segmented_transmittance(b, ttot_all, segment_data)

@@ -37,8 +37,8 @@ def tiles_interp(*args, interpolator='interpn', **kwargs):
         raise ValueError(f"Unknown interpolator: {interpolator}")
 
 def tiles_interpn(data, xnew, ynew, smooth = False, kern_size=2, method='nearest', mask = None,
-                 target_mask = None, target_mask_full = False, fill_nan = True, dtype = 'float32', use_rgi = False):
-
+                 target_mask = None, target_mask_full = False, fill_nan = True, dtype = 'float32', use_rgi = False, num_threads=0):
+    # num_threads is not used in this function, but can be passed for consistency with pyinterp
     if mask is not None: data[mask] = np.nan
 
     ## fill nans with closest value
@@ -82,7 +82,7 @@ def tiles_interpn(data, xnew, ynew, smooth = False, kern_size=2, method='nearest
     return(znew)
 
 def tiles_pyinterp(data, xnew, ynew, smooth=False, kern_size=2, method='nearest', mask=None,
-                 target_mask=None, target_mask_full=False, fill_nan=True, dtype='float32', use_rgi=False):
+                 target_mask=None, target_mask_full=False, fill_nan=True, dtype='float32', use_rgi=False, num_threads=0):
     if mask is not None:
         data[mask] = np.nan
 
@@ -128,7 +128,7 @@ def tiles_pyinterp(data, xnew, ynew, smooth=False, kern_size=2, method='nearest'
     znew = grid.bivariate(coords={
         'x': xi,
         'y': yi
-        }, interpolator=interpolator)
+        }, interpolator=interpolator, num_threads=num_threads)
 
     # Reshape output
     if target_mask is not None and target_mask_full:

@@ -43,6 +43,7 @@ def test_tiles_interp_regression():
                 dtype="float32",
                 use_rgi=False,
                 interpolator="pyinterp",
+                num_threads=8
             )
             elapsed_time = time.time() - start_time
             print(f"random_data: pyinterp execution time: {elapsed_time:.4f} seconds")
@@ -61,6 +62,7 @@ def test_tiles_interp_regression():
                 dtype="float32",
                 use_rgi=False,
                 interpolator="interpn",
+                num_threads=0
             )
             elapsed_time = time.time() - start_time
             print(f"random_data: interpn execution time: {elapsed_time:.4f} seconds")
