@@ -48,6 +48,5 @@ def _parallel_map_dask(func, args_list, max_workers=None):
     """Execute func over args_list using dask.delayed with the threaded scheduler."""
     import dask
     tasks = [dask.delayed(func)(args) for args in args_list]
-    num_workers = max_workers if max_workers is not None else None
-    results = dask.compute(*tasks, scheduler='threads', num_workers=num_workers)
+    results = dask.compute(*tasks, scheduler='threads', num_workers=max_workers)
     return list(results)
