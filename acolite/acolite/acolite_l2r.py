@@ -27,7 +27,6 @@
 ##                2025-03-10 (QV) fix hyperspectral model selection, use setu['verbosity']
 ##                2025-04-30 (QV) added sensor noise bias correction
 ##                2025-05-16 (QV) added filtering for sensor noise bias correction
-import concurrent.futures
 import datetime
 import os
 import time
@@ -684,10 +683,12 @@ def acolite_l2r(gem,
 
     # with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_l2r_max_workers"]) as executor:
     # No need to limit max_workers on this computation as memory small
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        geom_mean_items = executor.map(_compute_geom_mean_worker, [(k, gem) for k in geom_ds])
-        geom_mean = dict(geom_mean_items)
-        del geom_mean_items
+    geom_mean_results = ac.shared.parallel_map(
+        _compute_geom_mean_worker,
+        [(k, gem) for k in geom_ds],
+        scheduler=setu.get('acolite-mp_scheduler', 'threading'),
+    )
+    geom_mean = dict(geom_mean_results)
 
     if (geom_mean['sza'] > setu['sza_limit']):
         print('Warning: SZA out of LUT range')
@@ -1033,9 +1034,13 @@ def acolite_l2r(gem,
             ]
 
             # with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_l2r_max_workers"]) as executor:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_l2r_max_workers_process_dsf"]) as executor:
-                results = executor.map(_process_dsf_band_wrapper, band_args)
-                for result in results:
+            dsf_results = ac.shared.parallel_map(
+                _process_dsf_band_wrapper,
+                band_args,
+                scheduler=setu.get('acolite-mp_scheduler', 'threading'),
+                max_workers=setu['acolite-mp_acolite_l2r_max_workers_process_dsf'],
+            )
+            for result in dsf_results:
                     if result is None:
                         continue
                     aot_band, b, dsf_rhod_b, gk = result
@@ -1043,7 +1048,7 @@ def acolite_l2r(gem,
                     aot_bands.append(b)
                     if dsf_rhod_b is not None:
                         dsf_rhod[b] = dsf_rhod_b
-                del results
+            del dsf_results
 
             ## test if valid data could be extracted
             if len(aot_bands) == 0:
@@ -1489,8 +1494,12 @@ def acolite_l2r(gem,
             ))
 
     # all_results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_l2r_max_workers_process_dsf"]) as executor:
-        _ = executor.map(_process_band_wrapper, band_args)
+    ac.shared.parallel_map(
+        _process_band_wrapper,
+        band_args,
+        scheduler=setu.get('acolite-mp_scheduler', 'threading'),
+        max_workers=setu['acolite-mp_acolite_l2r_max_workers_process_dsf'],
+    )
 
     ## glint correction
     if (ac_opt == 'dsf') & (setu['dsf_residual_glint_correction']) & (setu['dsf_residual_glint_correction_method']=='default'):
@@ -1597,16 +1606,20 @@ def acolite_l2r(gem,
                     for rhos_ds, b in wave_band_mapping
                 ]
 
-                with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_l2r_max_workers_glint_corr"]) as executor:
-                    results = executor.map(_glint_band_worker, args_list)
-                    for result in results:
+                glint_results = ac.shared.parallel_map(
+                    _glint_band_worker,
+                    args_list,
+                    scheduler=setu.get('acolite-mp_scheduler', 'threading'),
+                    max_workers=setu['acolite-mp_acolite_l2r_max_workers_glint_corr'],
+                )
+                for result in glint_results:
                         if 'T_USER' in result:
                             T_USER = result['T_USER']
                         if 'T_SWIR1' in result:
                             T_SWIR1 = result['T_SWIR1']
                         if 'T_SWIR2' in result:
                             T_SWIR2 = result['T_SWIR2']
-                    del results
+                del glint_results
                 ## swir band choice is made for first band - loop through to find it!
                 for ib, b in enumerate(gemo.bands):
                     rhos_ds = gemo.bands[b]['rhos_ds']
@@ -2602,8 +2615,12 @@ def process_glint_correction_parallel(
         )
         return
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_l2r_max_workers_glint_corr"]) as executor:
-        _ = executor.map(_process_single_band, band_data_dict.items())
+    ac.shared.parallel_map(
+        _process_single_band,
+        list(band_data_dict.items()),
+        scheduler=setu.get('acolite-mp_scheduler', 'threading'),
+        max_workers=setu['acolite-mp_acolite_l2r_max_workers_glint_corr'],
+    )
 
 
     return

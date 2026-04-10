@@ -53,6 +53,11 @@ dem_shadow_mask_filter_kernel
 dem_shadow_mask_erode_its
 dem_shadow_mask_dilate_its
 sensor_noise_bias_correction_resampling
+acolite-mp_l1_convert_max_workers
+acolite-mp_acolite_l2r_max_workers_process_dsf
+acolite-mp_acolite_l2r_max_workers_glint_corr
+acolite-mp_acolite_flags_max_workers
+acolite-mp_dask_chunk_size
 
 ## GEE
 percentiles

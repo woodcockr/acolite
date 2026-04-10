@@ -592,3 +592,19 @@ slicing=False
 # CDSE or EarthExplorer download
 scene_download=False
 scene_download_directory=None
+
+## acolite-mp parallel processing settings
+## interpolation backend for tiles_interp: 'interpn' (scipy, default) or 'pyinterp' (multi-threaded)
+acolite-mp_tiles_interpolator=interpn
+## parallel execution backend: 'threading' (concurrent.futures, default) or 'dask'
+acolite-mp_scheduler=threading
+## max parallel workers for L1 conversion (None = ThreadPoolExecutor default)
+acolite-mp_l1_convert_max_workers=None
+## max parallel workers for DSF band processing and surface reflectance computation
+acolite-mp_acolite_l2r_max_workers_process_dsf=None
+## max parallel workers for glint correction band processing
+acolite-mp_acolite_l2r_max_workers_glint_corr=None
+## max parallel workers for flag computation
+acolite-mp_acolite_flags_max_workers=None
+## dask chunk size for array operations (None = no chunking)
+acolite-mp_dask_chunk_size=None

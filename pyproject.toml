@@ -18,6 +18,9 @@ dependencies = [
     "matplotlib",
     "scikit-image",
     "pyproj",
+    "xarray",
+    "pyinterp",
+    "dask",
 ]
 
 [project.optional-dependencies]
