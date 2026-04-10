@@ -6,7 +6,6 @@
 ## modifications: 2024-05-21 (QV) skip negative rhos masking if rhos datasets are not present
 ##                2024-01-31 (QV) use first dataset to determine dimensions
 ##                2025-02-04 (QV) updated settings parsing
-import concurrent.futures
 
 import numpy as np
 import scipy.ndimage
@@ -117,11 +116,20 @@ def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, ret
 
     ## compute flags
     # Run compute_non_water_swir_mask and compute_cirrus_mask in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_flags_max_workers"]) as executor:
-        future_swir = executor.submit(compute_non_water_swir_mask, gem, rhot_ds, rhot_waves, setu)
-        future_cirrus = executor.submit(compute_cirrus_mask, gem, rhot_ds, rhot_waves, setu)
-        flags = future_swir.result()
-        cirrus_flags = future_cirrus.result()
+    def _run_mask_func(args):
+        func, gem, rhot_ds, rhot_waves, setu = args
+        return func(gem, rhot_ds, rhot_waves, setu)
+
+    mask_results = ac.shared.parallel_map(
+        _run_mask_func,
+        [
+            (compute_non_water_swir_mask, gem, rhot_ds, rhot_waves, setu),
+            (compute_cirrus_mask, gem, rhot_ds, rhot_waves, setu),
+        ],
+        scheduler=setu.get('acolite-mp_scheduler', 'threading'),
+        max_workers=setu['acolite-mp_acolite_flags_max_workers'],
+    )
+    flags, cirrus_flags = mask_results
 
     if cirrus_flags is not None:
         flags = (flags) | cirrus_flags
@@ -136,40 +144,38 @@ def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, ret
     for ci, cur_par in enumerate(rhot_ds):
         gem.data(cur_par, store=True, return_data=False)
 
-    # Prepare arguments for parallel execution
-    toa_args = [(ci, cur_par, rhot_waves, setu) for ci, cur_par in enumerate(rhot_ds)]
+    # Prepare arguments for parallel execution; include pre-loaded data in each arg tuple
+    toa_args = [
+        (ci, cur_par, rhot_waves, gem.data_mem[cur_par], setu)
+        for ci, cur_par in enumerate(rhot_ds)
+    ]
 
-    toa_mask = None
-    outmask = None
+    def _toa_worker_wrapper(args):
+        ci, cur_par, rhot_waves, cur_data, setu = args
+        return toa_mask_worker(
+            ci, cur_par, rhot_waves, cur_data,
+            setu['l2w_mask_high_toa_wave_range'], setu['l2w_mask_high_toa_threshold'],
+            setu['l2w_mask_smooth'], setu['l2w_mask_smooth_sigma'], setu['verbosity'],
+        )
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_flags_max_workers"]) as executor:
-        futures = []
-        for ci, cur_par, rhot_waves, setu in toa_args:
-            futures.append(executor.submit(toa_mask_worker, ci, cur_par, rhot_waves, gem.data_mem[cur_par], setu['l2w_mask_high_toa_wave_range'], setu['l2w_mask_high_toa_threshold'], setu['l2w_mask_smooth'], setu['l2w_mask_smooth_sigma'], setu['verbosity']))
-        for future in concurrent.futures.as_completed(futures):
-            result = future.result()
-            if result is None:
-                continue
-            local_outmask, local_toa_mask = result
-            if outmask is None:
-                outmask = np.zeros(local_outmask.shape).astype(bool)
-            if toa_mask is None:
-                toa_mask = np.zeros(local_toa_mask.shape).astype(bool)
-            outmask = outmask | local_outmask
-            toa_mask = toa_mask | local_toa_mask
-            del local_outmask, local_toa_mask, result
-        # results = list(executor.map(toa_mask_worker, toa_args))
-    # for res in results:
-    #     if res is None:
-    #         continue
-    #     local_outmask, local_toa_mask = res
-    #     if outmask is None:
-    #         outmask = np.zeros(local_outmask.shape).astype(bool)
-    #     if toa_mask is None:
-    #         toa_mask = np.zeros(local_toa_mask.shape).astype(bool)
-    #     outmask = outmask | local_outmask
-    #     toa_mask = toa_mask | local_toa_mask
-    # del results
+    toa_results = ac.shared.parallel_map(
+        _toa_worker_wrapper,
+        toa_args,
+        scheduler=setu.get('acolite-mp_scheduler', 'threading'),
+        max_workers=setu['acolite-mp_acolite_flags_max_workers'],
+    )
+    for result in toa_results:
+        if result is None:
+            continue
+        local_outmask, local_toa_mask = result
+        if outmask is None:
+            outmask = np.zeros(local_outmask.shape).astype(bool)
+        if toa_mask is None:
+            toa_mask = np.zeros(local_toa_mask.shape).astype(bool)
+        outmask = outmask | local_outmask
+        toa_mask = toa_mask | local_toa_mask
+        del local_outmask, local_toa_mask, result
+    del toa_results
     flags = (flags) | (toa_mask.astype(np.int32)*(2**setu['flag_exponent_toa']))
     toa_mask = None
     flags = (flags) | (outmask.astype(np.int32)*(2**setu['flag_exponent_outofscene']))
@@ -224,16 +230,20 @@ def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, ret
         neg_args = [(ci, cur_par, rhos_waves, rhos_ds, setu, gem) for ci, cur_par in enumerate(rhos_ds)]
 
         neg_mask = None
-        with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_flags_max_workers"]) as executor:
-            results = list(executor.map(neg_mask_worker, neg_args))
+        neg_results = ac.shared.parallel_map(
+            neg_mask_worker,
+            neg_args,
+            scheduler=setu.get('acolite-mp_scheduler', 'threading'),
+            max_workers=setu['acolite-mp_acolite_flags_max_workers'],
+        )
 
-        for local_neg_mask in results:
+        for local_neg_mask in neg_results:
             if local_neg_mask is None:
                 continue
             if neg_mask is None:
                 neg_mask = np.zeros(local_neg_mask.shape).astype(bool)
             neg_mask = neg_mask | local_neg_mask
-        del results
+        del neg_results
 
         flags = (flags) | (neg_mask.astype(np.int32)*(2**setu['flag_exponent_negative']))
         neg_mask = None

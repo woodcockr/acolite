@@ -16,7 +16,6 @@
 ##                2025-02-02 (QV) removed percentiles
 ##                2025-02-04 (QV) improved settings handling
 ##                2025-02-10 (QV) cleaned up settings use, output naming
-import concurrent.futures
 import glob
 import os
 import sys
@@ -28,7 +27,6 @@ import scipy.ndimage
 from osgeo import gdal, ogr, osr
 
 import acolite as ac
-from concurrent.futures import ThreadPoolExecutor
 
 def warp_from_source_parallel(args):
     return ac.shared.warp_from_source(*args)
@@ -424,16 +422,17 @@ def l1_convert(inputfile, output = None, settings = None,
 
                 ## use target band so we can just do the 60 metres geometry
                 if os.path.exists(target_file):
-                    with ThreadPoolExecutor(max_workers=setu["acolite-mp_l1_convert_max_workers"]) as executor:
-                        results = list(executor.map(
-                            warp_from_source_parallel,
-                            [
-                                (target_file, dct_prj, sza, warp_to),
-                                (target_file, dct_prj, saa, warp_to),
-                                (target_file, dct_prj, vza, warp_to),
-                                (target_file, dct_prj, vaa, warp_to),
-                            ]
-                        ))
+                    results = ac.shared.parallel_map(
+                        warp_from_source_parallel,
+                        [
+                            (target_file, dct_prj, sza, warp_to),
+                            (target_file, dct_prj, saa, warp_to),
+                            (target_file, dct_prj, vza, warp_to),
+                            (target_file, dct_prj, vaa, warp_to),
+                        ],
+                        scheduler=setu.get('acolite-mp_scheduler', 'threading'),
+                        max_workers=setu['acolite-mp_l1_convert_max_workers'],
+                    )
                     sza, saa, vza, vaa = results
                     mask = (vaa == 0) * (vza == 0) * (saa == 0) * (sza == 0)
                 else:
@@ -703,9 +702,15 @@ def l1_convert(inputfile, output = None, settings = None,
             for b in rsr_bands
         ]
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_l1_convert_max_workers"]) as executor:
-            results = list(executor.map(lambda args: process_band_s2(*args), band_args))
+        def _process_band_s2_wrapper(args):
+            return process_band_s2(*args)
 
+        results = ac.shared.parallel_map(
+            _process_band_s2_wrapper,
+            band_args,
+            scheduler=setu.get('acolite-mp_scheduler', 'threading'),
+            max_workers=setu['acolite-mp_l1_convert_max_workers'],
+        )
         for res in results:
             if res is None:
                 continue

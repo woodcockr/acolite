@@ -29,8 +29,6 @@ import scipy.ndimage
 
 import acolite as ac
 
-import concurrent.futures
-
 def process_band(b, fmeta, setu, waves_names, pan_bands, output_pan, output_pan_ms, mus, pan_scale, sub_pan, warp_to_pan,
                  sub, warp_to, waves_mu, verbosity, gains_dict, clip_mask, thermal_bands,
                  output_thermal):
@@ -543,8 +541,15 @@ def l1_convert(inputfile, output = None, settings = None,
         temp_results = {}
         temp_results_pan = {}
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_l1_convert_max_workers"]) as executor:
-            results = list(executor.map(lambda args: process_band(*args), band_args))
+        def _process_band_wrapper_ls(args):
+            return process_band(*args)
+
+        results = ac.shared.parallel_map(
+            _process_band_wrapper_ls,
+            band_args,
+            scheduler=setu.get('acolite-mp_scheduler', 'threading'),
+            max_workers=setu['acolite-mp_l1_convert_max_workers'],
+        )
 
         for res in results:
             if res is None:
