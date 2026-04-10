@@ -164,6 +164,8 @@ def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, ret
         scheduler=setu.get('acolite-mp_scheduler', 'threading'),
         max_workers=setu['acolite-mp_acolite_flags_max_workers'],
     )
+    toa_mask = None
+    outmask = None
     for result in toa_results:
         if result is None:
             continue

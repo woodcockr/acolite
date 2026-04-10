@@ -541,11 +541,11 @@ def l1_convert(inputfile, output = None, settings = None,
         temp_results = {}
         temp_results_pan = {}
 
-        def _process_band_wrapper_ls(args):
+        def _process_band_wrapper(args):
             return process_band(*args)
 
         results = ac.shared.parallel_map(
-            _process_band_wrapper_ls,
+            _process_band_wrapper,
             band_args,
             scheduler=setu.get('acolite-mp_scheduler', 'threading'),
             max_workers=setu['acolite-mp_l1_convert_max_workers'],
