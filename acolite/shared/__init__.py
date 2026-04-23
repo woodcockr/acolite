@@ -38,6 +38,7 @@ from .datascl import *
 from .closest_idx import *
 from .isodate_to_yday import *
 from .download_file import *
+from .download_files import *
 from .hdr import *
 
 from .region_box import *

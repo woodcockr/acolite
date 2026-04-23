@@ -10,6 +10,33 @@
 ##               2021-05-31 (QV) added remote lut retrieval
 ##               2021-07-20 (QV) added retrieval of generic LUTs
 ##                2023-08-03 (QV) get lut url from ac.config
+##                2026-04-23 (Copilot) extracted _remote_paths_rsky helper for prefetch
+
+def _remote_paths_rsky(model, lutbase = 'ACOLITE-RSKY-202102-82W', sensor = None,
+                       remote_base = None):
+    """Return ``(remote_url, local_path)`` for an RSKY LUT file.
+
+    Generic LUT (``sensor is None``) -> bz2-compressed download path.
+    Sensor LUT -> resampled NetCDF download path.
+    """
+    import acolite as ac
+    if remote_base is None: remote_base = '{}'.format(ac.config['lut_url'])
+    lutdir = '{}/{}/'.format(ac.config['lut_dir'], '-'.join(lutbase.split('-')[1:3]))
+    lutnc = '{}/{}-MOD{}.nc'.format(lutdir, lutbase, model)
+    if sensor is None:
+        lutncbz2 = '{}.bz2'.format(lutnc)
+        remote_lut = '{}/{}/{}'.format(
+            remote_base, '-'.join(lutbase.split('-')[1:3]),
+            '{}-MOD{}.nc.bz2'.format(lutbase, model),
+        )
+        return remote_lut, lutncbz2
+    slut = '{}-MOD{}_{}'.format(lutbase, model, sensor)
+    lutnc_s = '{}/{}/{}.nc'.format(lutdir, sensor, slut)
+    remote_lut = '{}/{}/{}/{}.nc'.format(
+        remote_base, '-'.join(lutbase.split('-')[1:3]), sensor, slut,
+    )
+    return remote_lut, lutnc_s
+
 
 def import_rsky_lut(model, lutbase='ACOLITE-RSKY-202102-82W', sensor=None, override=False,
                     get_remote = True, remote_base = None):
@@ -18,7 +45,7 @@ def import_rsky_lut(model, lutbase='ACOLITE-RSKY-202102-82W', sensor=None, overr
     import scipy.interpolate
     from netCDF4 import Dataset
     import acolite as ac
-    
+
     ## use URL from main config
     if remote_base is None: remote_base = '{}'.format(ac.config['lut_url'])
 
@@ -30,11 +57,11 @@ def import_rsky_lut(model, lutbase='ACOLITE-RSKY-202102-82W', sensor=None, overr
             if sensor is None:
                 ## extract bz2 files
                 unzipped = False
-                lutncbz2 = '{}.bz2'.format(lutnc)
+                _, lutncbz2 = _remote_paths_rsky(model, lutbase = lutbase, sensor = None, remote_base = remote_base)
 
                 ## try downloading LUT from GitHub
                 if (not os.path.isfile(lutnc)) & (not os.path.isfile(lutncbz2)) & (get_remote):
-                    remote_lut = '{}/{}/{}'.format(remote_base, '-'.join(lutbase.split('-')[1:3]), os.path.basename(lutncbz2))
+                    remote_lut, _ = _remote_paths_rsky(model, lutbase = lutbase, sensor = None, remote_base = remote_base)
                     try:
                         ac.shared.download_file(remote_lut, lutncbz2)
                     except:
@@ -66,8 +93,8 @@ def import_rsky_lut(model, lutbase='ACOLITE-RSKY-202102-82W', sensor=None, overr
             ## sensor specific lut
             else:
                 #lutnc_s = '{}/{}/{}-MOD{}_{}.nc'.format(lutdir, sensor, lutbase, model, sensor)
+                remote_lut, lutnc_s = _remote_paths_rsky(model, lutbase = lutbase, sensor = sensor, remote_base = remote_base)
                 slut = '{}-MOD{}_{}'.format(lutbase, model, sensor)
-                lutnc_s = '{}/{}/{}.nc'.format(lutdir, sensor, slut)
 
                 ## get sensor RSR
                 lutdir=ac.config['lut_dir']
@@ -79,7 +106,6 @@ def import_rsky_lut(model, lutbase='ACOLITE-RSKY-202102-82W', sensor=None, overr
 
                 ## try downloading LUT from GitHub
                 if (not os.path.isfile(lutnc_s)) & (get_remote):
-                    remote_lut = '{}/{}/{}/{}.nc'.format(remote_base, '-'.join(lutbase.split('-')[1:3]), sensor, slut)
                     try:
                         ac.shared.download_file(remote_lut, lutnc_s)
                     except:

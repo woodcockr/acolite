@@ -55,6 +55,59 @@ def acolite_luts(sensor = None, hyper = False,
     ## Add "None" to sensors to retrieve generic LUT
     if hyper: sensors += [None]
 
+    ## prefetch all required LUT files in parallel before the per-sensor loop.
+    ## the existing import path below will then find every file in cache and skip
+    ## the network. URL/local-path conventions live in the per-LUT helpers so the
+    ## sequential code path remains the source of truth.
+    if get_remote:
+        from acolite.aerlut.import_lut import _remote_paths_lut
+        from acolite.aerlut.import_rsky_lut import _remote_paths_rsky
+        from acolite.aerlut.reverse_lut import _remote_paths_reverse
+
+        prefetch_jobs = []
+        skip_sensors = {'L5_TM_B6', 'L7_ETM_B6', 'L8_TIRS', 'L9_TIRS',
+                        'EO1_ALI_ORANGE', 'L8_OLI_ORANGE', 'L9_OLI_ORANGE'}
+
+        def _is_skipped(name):
+            if name is None: return False
+            if name in skip_sensors: return True
+            if '_CONTRA' in name: return True
+            if 'DESIS' in name: return True
+            return False
+
+        for s in sensors:
+            if _is_skipped(s): continue
+
+            ## sensor LUTs across base x pressure
+            for base_lut in base_luts:
+                for pr in pressures:
+                    lutid = '{}-{}mb'.format(base_lut, '{}'.format(pr).zfill(4))
+                    lutdir = '{}/{}'.format(ac.config['lut_dir'], '-'.join(lutid.split('-')[0:3]))
+                    url, path = _remote_paths_lut(lutid, lutdir, sensor = s)
+                    prefetch_jobs.append((url, path))
+
+            ## RSKY LUTs (MOD1 + MOD2)
+            for model in (1, 2):
+                url, path = _remote_paths_rsky(model, lutbase = rsky_lut, sensor = s)
+                prefetch_jobs.append((url, path))
+
+            ## reverse LUTs - only when computed and supported
+            if compute_reverse and (s is not None) and (s in ac.config['reverse_lut_sensors']):
+                rsr_file = ac.config['data_dir'] + '/RSR/{}.txt'.format(s)
+                try:
+                    _, rsr_bands = ac.shared.rsr_read(rsr_file)
+                except Exception:
+                    rsr_bands = []
+                for base_lut in base_luts:
+                    for par in pars:
+                        for b in rsr_bands:
+                            url, path = _remote_paths_reverse(s, base_lut, par, b)
+                            prefetch_jobs.append((url, path))
+
+        if prefetch_jobs:
+            print('Prefetching up to {} LUT file(s) in parallel'.format(len(prefetch_jobs)))
+            ac.shared.download_files(prefetch_jobs, verbosity = 1)
+
     ## run through wanted sensors
     for s in sensors:
         if s is not None:
