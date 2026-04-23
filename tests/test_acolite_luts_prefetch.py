@@ -102,6 +102,82 @@ def test_acolite_luts_prefetch_builds_expected_jobs(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# 1b. Per-sensor load loop: parallel dispatch, fault isolation, short-circuit
+# ---------------------------------------------------------------------------
+def _stub_acolite_luts_internals(monkeypatch, import_luts_side_effect=None):
+    """Common stubs for the per-sensor load loop tests: skip prefetch and
+    no-op the gas/reverse calls so we can drive the loop without I/O."""
+    monkeypatch.setattr(ac.shared, 'download_files', lambda jobs, **kw: {})
+    monkeypatch.setattr(ac.ac, 'gas_transmittance', lambda *a, **kw: {})
+    monkeypatch.setattr(ac.aerlut, 'reverse_lut', lambda *a, **kw: None)
+    if import_luts_side_effect is not None:
+        monkeypatch.setattr(ac.aerlut, 'import_luts', import_luts_side_effect)
+
+
+def test_per_sensor_loop_dispatches_concurrently(monkeypatch):
+    """With multiple sensors, the load loop should dispatch on a thread pool."""
+    import threading
+
+    threads_seen = set()
+    sensors_seen = []
+    barrier = threading.Barrier(4, timeout=5)
+
+    def fake_import_luts(sensor=None, **kw):
+        threads_seen.add(threading.current_thread().name)
+        sensors_seen.append(sensor)
+        ## block until all 4 workers reach this point - proves parallelism
+        barrier.wait()
+        return {}
+
+    _stub_acolite_luts_internals(monkeypatch, import_luts_side_effect=fake_import_luts)
+
+    ac.acolite.acolite_luts(sensor='L8_OLI,S2A_MSI,L9_OLI,S2B_MSI',
+                            compute_reverse=False, get_remote=False)
+
+    ## all four sensors processed and at least 2 distinct worker threads used
+    assert len(sensors_seen) == 4
+    assert len(threads_seen) >= 2, 'expected concurrent dispatch, got {}'.format(threads_seen)
+
+
+def test_per_sensor_loop_isolates_failures(monkeypatch):
+    """A failure in one sensor must not prevent other sensors from completing,
+    and must surface as a final exception identifying the offending sensor."""
+    completed = []
+
+    def fake_import_luts(sensor=None, **kw):
+        if sensor == 'S2A_MSI':
+            raise RuntimeError('boom')
+        completed.append(sensor)
+        return {}
+
+    _stub_acolite_luts_internals(monkeypatch, import_luts_side_effect=fake_import_luts)
+
+    with pytest.raises(Exception, match='S2A_MSI'):
+        ac.acolite.acolite_luts(sensor='L8_OLI,S2A_MSI,L9_OLI,S2B_MSI',
+                                compute_reverse=False, get_remote=False)
+
+    ## the three healthy sensors all finished despite the failing one
+    assert set(completed) == {'L8_OLI', 'L9_OLI', 'S2B_MSI'}
+
+
+def test_per_sensor_loop_single_sensor_stays_on_main_thread(monkeypatch):
+    """Single-sensor case must short-circuit the pool to avoid overhead."""
+    import threading
+
+    seen_thread = []
+
+    def fake_import_luts(sensor=None, **kw):
+        seen_thread.append(threading.current_thread().name)
+        return {}
+
+    _stub_acolite_luts_internals(monkeypatch, import_luts_side_effect=fake_import_luts)
+
+    ac.acolite.acolite_luts(sensor='L8_OLI', compute_reverse=False, get_remote=False)
+
+    assert seen_thread == [threading.main_thread().name]
+
+
+# ---------------------------------------------------------------------------
 # 2. download_files: idempotency, parallelism, config override
 # ---------------------------------------------------------------------------
 def test_download_files_parallel_and_idempotent(monkeypatch, tmp_path):

@@ -7,6 +7,7 @@
 ##                2022-04-12 (QV) add par parameter to import_luts
 ##                2025-02-11 (QV) add sensor settings parsing and reverse_lut_sensors list
 ##                2025-02-15 (QV) fix for rsr_version
+##                2026-04-23 (Copilot) parallel prefetch + bounded thread pool around per-sensor load
 
 def acolite_luts(sensor = None, hyper = False,
                  get_remote = True, compute_reverse = True,
@@ -109,24 +110,59 @@ def acolite_luts(sensor = None, hyper = False,
             ac.shared.download_files(prefetch_jobs, verbosity = 1)
 
     ## run through wanted sensors
-    for s in sensors:
+    def _load_sensor(s):
         if s is not None:
-            if s in ['L5_TM_B6', 'L7_ETM_B6', 'L8_TIRS', 'L9_TIRS']: continue ## skip thermals
-            if s in ['EO1_ALI_ORANGE', 'L8_OLI_ORANGE', 'L9_OLI_ORANGE']: continue ## skip contrabands
-            if '_CONTRA' in s: continue ## skip contrabands
-            if 'DESIS' in s: continue ## skip DESIS
+            if s in ['L5_TM_B6', 'L7_ETM_B6', 'L8_TIRS', 'L9_TIRS']:
+                return (s, True, None)  ## skip thermals
+            if s in ['EO1_ALI_ORANGE', 'L8_OLI_ORANGE', 'L9_OLI_ORANGE']:
+                return (s, True, None)  ## skip contrabands
+            if '_CONTRA' in s: return (s, True, None)  ## skip contrabands
+            if 'DESIS' in s: return (s, True, None)  ## skip DESIS
 
         print('Testing {}'.format('sensor {}'.format(s) if s is not None else 'generic LUT'))
 
-        ## try getting gas transmittance
-        tg_dict = ac.ac.gas_transmittance(0, 0, uoz=0.3, uwv=1.6, rsr=None if s is None else rsrd[s]['rsr'])
+        try:
+            ## try getting gas transmittance
+            tg_dict = ac.ac.gas_transmittance(0, 0, uoz=0.3, uwv=1.6, rsr=None if s is None else rsrd[s]['rsr'])
 
-        ## get sensor LUT
-        tmp = ac.aerlut.import_luts(sensor = s, get_remote = get_remote, pressures = pressures, par=pars[-1],
-                                    base_luts = base_luts, rsky_lut = rsky_lut)
+            ## get sensor LUT
+            tmp = ac.aerlut.import_luts(sensor = s, get_remote = get_remote, pressures = pressures, par=pars[-1],
+                                        base_luts = base_luts, rsky_lut = rsky_lut)
 
-        ## get reverse LUT
-        if (compute_reverse) & (s is not None) & (s in ac.config['reverse_lut_sensors']):
-            for par in pars:
-                revl = ac.aerlut.reverse_lut(s, get_remote = get_remote, par=par, pressures = pressures,
-                                            base_luts = base_luts, rsky_lut = rsky_lut)
+            ## get reverse LUT
+            if (compute_reverse) & (s is not None) & (s in ac.config['reverse_lut_sensors']):
+                for par in pars:
+                    revl = ac.aerlut.reverse_lut(s, get_remote = get_remote, par=par, pressures = pressures,
+                                                base_luts = base_luts, rsky_lut = rsky_lut)
+        except Exception as exc:
+            return (s, False, exc)
+        return (s, True, None)
+
+    ## bounded thread pool around the per-sensor load loop. Each task is
+    ## independent (returns its own dict, no shared mutable state); threads
+    ## overlap NetCDF reads + RGI construction across sensors. Single-sensor
+    ## case short-circuits to avoid pool overhead.
+    summaries = []
+    if len(sensors) <= 1:
+        for s in sensors:
+            summaries.append(_load_sensor(s))
+    else:
+        import concurrent.futures
+        max_workers = ac.config.get('lut_load_workers', 4) if hasattr(ac, 'config') else 4
+        try:
+            max_workers = int(max_workers)
+        except (TypeError, ValueError):
+            max_workers = 4
+        max_workers = max(1, min(max_workers, len(sensors)))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+            for fut in concurrent.futures.as_completed(
+                    [ex.submit(_load_sensor, s) for s in sensors]):
+                summaries.append(fut.result())
+
+    ## report and re-raise on first failure (fail-after-drain)
+    failures = [(s, e) for (s, ok, e) in summaries if not ok]
+    print('acolite_luts: loaded {} sensor(s), {} failed'.format(
+        len(summaries) - len(failures), len(failures)))
+    if failures:
+        s, e = failures[0]
+        raise Exception('acolite_luts: failed to load sensor {}: {}'.format(s, e)) from e
