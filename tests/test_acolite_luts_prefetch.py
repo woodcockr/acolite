@@ -114,19 +114,17 @@ def _stub_acolite_luts_internals(monkeypatch, import_luts_side_effect=None):
         monkeypatch.setattr(ac.aerlut, 'import_luts', import_luts_side_effect)
 
 
-def test_per_sensor_loop_dispatches_concurrently(monkeypatch):
-    """With multiple sensors, the load loop should dispatch on a thread pool."""
+def test_per_sensor_loop_runs_sequentially(monkeypatch):
+    """Per-sensor load is sequential (HDF5/netCDF4 are not thread-safe by
+    default). All sensors must run on the main thread and in submission order."""
     import threading
 
     threads_seen = set()
     sensors_seen = []
-    barrier = threading.Barrier(4, timeout=5)
 
     def fake_import_luts(sensor=None, **kw):
         threads_seen.add(threading.current_thread().name)
         sensors_seen.append(sensor)
-        ## block until all 4 workers reach this point - proves parallelism
-        barrier.wait()
         return {}
 
     _stub_acolite_luts_internals(monkeypatch, import_luts_side_effect=fake_import_luts)
@@ -134,9 +132,8 @@ def test_per_sensor_loop_dispatches_concurrently(monkeypatch):
     ac.acolite.acolite_luts(sensor='L8_OLI,S2A_MSI,L9_OLI,S2B_MSI',
                             compute_reverse=False, get_remote=False)
 
-    ## all four sensors processed and at least 2 distinct worker threads used
-    assert len(sensors_seen) == 4
-    assert len(threads_seen) >= 2, 'expected concurrent dispatch, got {}'.format(threads_seen)
+    assert sensors_seen == ['L8_OLI', 'L9_OLI', 'S2A_MSI', 'S2B_MSI']
+    assert threads_seen == {threading.main_thread().name}
 
 
 def test_per_sensor_loop_isolates_failures(monkeypatch):
@@ -158,23 +155,6 @@ def test_per_sensor_loop_isolates_failures(monkeypatch):
 
     ## the three healthy sensors all finished despite the failing one
     assert set(completed) == {'L8_OLI', 'L9_OLI', 'S2B_MSI'}
-
-
-def test_per_sensor_loop_single_sensor_stays_on_main_thread(monkeypatch):
-    """Single-sensor case must short-circuit the pool to avoid overhead."""
-    import threading
-
-    seen_thread = []
-
-    def fake_import_luts(sensor=None, **kw):
-        seen_thread.append(threading.current_thread().name)
-        return {}
-
-    _stub_acolite_luts_internals(monkeypatch, import_luts_side_effect=fake_import_luts)
-
-    ac.acolite.acolite_luts(sensor='L8_OLI', compute_reverse=False, get_remote=False)
-
-    assert seen_thread == [threading.main_thread().name]
 
 
 # ---------------------------------------------------------------------------
@@ -303,6 +283,90 @@ def test_download_file_backoff_and_retry_after(monkeypatch, tmp_path):
                                 verbosity=0)
     assert not bad.exists()
     assert sleeps == []  # no retry sleep for non-retryable status
+
+
+def test_download_file_truncated_body_retries(monkeypatch, tmp_path):
+    """A 200 response whose body is shorter than Content-Length must be
+    treated as a retryable failure, never written to the destination, and
+    must succeed once a full-length body is served."""
+    monkeypatch.setitem(ac.config, 'scratch_dir', str(tmp_path / 'scratch'))
+
+    sleeps = []
+    monkeypatch.setattr('time.sleep', lambda s: sleeps.append(s))
+
+    full_body = b'X' * 1024
+    scripted = [
+        ## first response: 200 OK but body is half the advertised size
+        _FakeResponse(200, headers={'Content-Length': str(len(full_body))},
+                      body=full_body[:512]),
+        ## second response: full body, declared size matches
+        _FakeResponse(200, headers={'Content-Length': str(len(full_body))},
+                      body=full_body),
+    ]
+    monkeypatch.setattr('requests.Session', lambda: _FakeSession(scripted))
+
+    dest = tmp_path / 'maybe_truncated.bin'
+    ac.shared.download_file('http://example.invalid/file', str(dest),
+                            retry=4, backoff_base=0.5, backoff_cap=2.0,
+                            verbosity=0)
+
+    assert dest.exists()
+    assert dest.read_bytes() == full_body
+    assert len(sleeps) == 1  # one backoff sleep between truncated and good
+
+    ## sub-case: truncation persists for the entire retry budget -> raise,
+    ## destination must NOT exist
+    monkeypatch.setitem(ac.config, 'scratch_dir', str(tmp_path / 'scratch2'))
+    sleeps.clear()
+    persistent = [
+        _FakeResponse(200, headers={'Content-Length': str(len(full_body))},
+                      body=full_body[:256])
+        for _ in range(5)
+    ]
+    monkeypatch.setattr('requests.Session', lambda: _FakeSession(persistent))
+
+    bad = tmp_path / 'always_truncated.bin'
+    with pytest.raises(Exception, match='truncated'):
+        ac.shared.download_file('http://example.invalid/bad', str(bad),
+                                retry=4, backoff_base=0.5, backoff_cap=2.0,
+                                verbosity=0)
+    assert not bad.exists()
+
+
+def test_download_file_chunked_encoding_error_retries(monkeypatch, tmp_path):
+    """A mid-body ChunkedEncodingError must be caught and retried rather
+    than propagated; subsequent successful response should produce the file."""
+    import requests
+
+    monkeypatch.setitem(ac.config, 'scratch_dir', str(tmp_path / 'scratch'))
+
+    sleeps = []
+    monkeypatch.setattr('time.sleep', lambda s: sleeps.append(s))
+
+    raised = {'done': False}
+
+    class _RaisingResponse(_FakeResponse):
+        def iter_content(self, chunk_size=1024 * 1024):
+            ## simulate a mid-body connection drop on the first call only
+            if not raised['done']:
+                raised['done'] = True
+                raise requests.exceptions.ChunkedEncodingError('drop')
+            yield self._body
+
+    scripted = [
+        _RaisingResponse(200, headers={'Content-Length': '4'}, body=b'okay'),
+        _FakeResponse(200, headers={'Content-Length': '4'}, body=b'okay'),
+    ]
+    monkeypatch.setattr('requests.Session', lambda: _FakeSession(scripted))
+
+    dest = tmp_path / 'flaky.bin'
+    ac.shared.download_file('http://example.invalid/flaky', str(dest),
+                            retry=4, backoff_base=0.5, backoff_cap=2.0,
+                            verbosity=0)
+
+    assert dest.exists()
+    assert dest.read_bytes() == b'okay'
+    assert len(sleeps) == 1  # one backoff between raise and success
 
 
 # ---------------------------------------------------------------------------

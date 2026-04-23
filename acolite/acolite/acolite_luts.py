@@ -138,26 +138,13 @@ def acolite_luts(sensor = None, hyper = False,
             return (s, False, exc)
         return (s, True, None)
 
-    ## bounded thread pool around the per-sensor load loop. Each task is
-    ## independent (returns its own dict, no shared mutable state); threads
-    ## overlap NetCDF reads + RGI construction across sensors. Single-sensor
-    ## case short-circuits to avoid pool overhead.
+    ## per-sensor load loop. Sequential: HDF5/netCDF4 are not thread-safe by
+    ## default, and concurrent reads across sensors caused intermittent
+    ## "Can't open HDF5 attribute" failures. The parallel prefetch above
+    ## already provides the network-side speedup.
     summaries = []
-    if len(sensors) <= 1:
-        for s in sensors:
-            summaries.append(_load_sensor(s))
-    else:
-        import concurrent.futures
-        max_workers = ac.config.get('lut_load_workers', 4) if hasattr(ac, 'config') else 4
-        try:
-            max_workers = int(max_workers)
-        except (TypeError, ValueError):
-            max_workers = 4
-        max_workers = max(1, min(max_workers, len(sensors)))
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
-            for fut in concurrent.futures.as_completed(
-                    [ex.submit(_load_sensor, s) for s in sensors]):
-                summaries.append(fut.result())
+    for s in sensors:
+        summaries.append(_load_sensor(s))
 
     ## report and re-raise on first failure (fail-after-drain)
     failures = [(s, e) for (s, ok, e) in summaries if not ok]

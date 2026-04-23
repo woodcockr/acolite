@@ -16,6 +16,15 @@
 ##                                     Retry-After honouring, fast-fail on non-retryable 4xx,
 ##                                     dropped unconditional time.sleep(1), thread-safe
 ##                                     scratch handling
+##                2026-04-23 (Copilot) validate Content-Length after write to detect
+##                                     truncated bodies; broaden retryable exception
+##                                     set to include ChunkedEncodingError; add a
+##                                     default request timeout so hung sockets surface
+##                                     as retryable timeouts.
+
+## Default (connect, read) timeouts in seconds. Read timeout is generous to
+## tolerate slow-but-progressing transfers without aborting healthy downloads.
+_DEFAULT_TIMEOUT = (10, 120)
 
 ## HTTP statuses that should trigger a retry rather than a permanent failure
 _RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504}
@@ -105,14 +114,41 @@ def download_file(url, file, auth = None, session = None,
     for attempt in range(1, attempts + 1):
         try:
             with requests.Session() as s:
-                r1 = s.request('get', url, verify=verify_ssl)
-                r = s.get(r1.url, auth=auth, verify=verify_ssl)
+                r1 = s.request('get', url, verify=verify_ssl, timeout=_DEFAULT_TIMEOUT)
+                r = s.get(r1.url, auth=auth, verify=verify_ssl, timeout=_DEFAULT_TIMEOUT)
 
                 if r.ok:
+                    expected = r.headers.get('Content-Length')
+                    try:
+                        expected = int(expected) if expected is not None else None
+                    except (TypeError, ValueError):
+                        expected = None
+
                     with open(temp_file, 'wb') as f:
                         for chunk in r.iter_content(chunk_size=1024*1024):
                             if chunk: # filter out keep-alive new chunks
                                 f.write(chunk)
+
+                    ## detect truncated bodies (Content-Length mismatch). Some
+                    ## CDNs occasionally serve a short body with a 200 status
+                    ## under sustained parallel load; HDF5 then fails much later
+                    ## with "truncated file" superblock errors. Treat as retryable.
+                    actual = os.path.getsize(temp_file) if os.path.exists(temp_file) else 0
+                    if expected is not None and actual != expected:
+                        try: os.remove(temp_file)
+                        except OSError: pass
+                        last_error = Exception(
+                            "Download of {} truncated: got {} bytes, expected {} (attempt {}/{})".format(
+                                url, actual, expected, attempt, attempts))
+                        if attempt >= attempts: break
+                        sleep_for = min(backoff_cap, backoff_base * (2 ** (attempt - 1)))
+                        sleep_for += random.uniform(0.0, backoff_base)
+                        if verbosity > 0:
+                            print('Truncated body for {} ({}/{} bytes), retrying in {:.1f}s ({}/{})'.format(
+                                url, actual, expected, sleep_for, attempt, attempts - 1))
+                        time.sleep(sleep_for)
+                        continue
+
                     last_error = None
                     break
 
@@ -142,7 +178,13 @@ def download_file(url, file, auth = None, session = None,
                         status, url, sleep_for, attempt, attempts - 1))
                 time.sleep(sleep_for)
 
-        except (requests.ConnectionError, requests.Timeout) as e:
+        except (requests.ConnectionError, requests.Timeout,
+                requests.exceptions.ChunkedEncodingError,
+                requests.exceptions.ContentDecodingError) as e:
+            ## clean up any partial temp file before retrying
+            if os.path.exists(temp_file):
+                try: os.remove(temp_file)
+                except OSError: pass
             last_error = e
             if attempt >= attempts: break
             sleep_for = min(backoff_cap, backoff_base * (2 ** (attempt - 1)))
