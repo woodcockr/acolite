@@ -7,6 +7,7 @@
 ##                2022-04-12 (QV) add par parameter to import_luts
 ##                2025-02-11 (QV) add sensor settings parsing and reverse_lut_sensors list
 ##                2025-02-15 (QV) fix for rsr_version
+##                2026-04-23 (Copilot) parallel prefetch + bounded thread pool around per-sensor load
 
 def acolite_luts(sensor = None, hyper = False,
                  get_remote = True, compute_reverse = True,
@@ -55,25 +56,100 @@ def acolite_luts(sensor = None, hyper = False,
     ## Add "None" to sensors to retrieve generic LUT
     if hyper: sensors += [None]
 
+    ## prefetch all required LUT files in parallel before the per-sensor loop.
+    ## the existing import path below will then find every file in cache and skip
+    ## the network. URL/local-path conventions live in the per-LUT helpers so the
+    ## sequential code path remains the source of truth.
+    if get_remote:
+        from acolite.aerlut.import_lut import _remote_paths_lut
+        from acolite.aerlut.import_rsky_lut import _remote_paths_rsky
+        from acolite.aerlut.reverse_lut import _remote_paths_reverse
+
+        prefetch_jobs = []
+        skip_sensors = {'L5_TM_B6', 'L7_ETM_B6', 'L8_TIRS', 'L9_TIRS',
+                        'EO1_ALI_ORANGE', 'L8_OLI_ORANGE', 'L9_OLI_ORANGE'}
+
+        def _is_skipped(name):
+            if name is None: return False
+            if name in skip_sensors: return True
+            if '_CONTRA' in name: return True
+            if 'DESIS' in name: return True
+            return False
+
+        for s in sensors:
+            if _is_skipped(s): continue
+
+            ## sensor LUTs across base x pressure
+            for base_lut in base_luts:
+                for pr in pressures:
+                    lutid = '{}-{}mb'.format(base_lut, '{}'.format(pr).zfill(4))
+                    lutdir = '{}/{}'.format(ac.config['lut_dir'], '-'.join(lutid.split('-')[0:3]))
+                    url, path = _remote_paths_lut(lutid, lutdir, sensor = s)
+                    prefetch_jobs.append((url, path))
+
+            ## RSKY LUTs (MOD1 + MOD2)
+            for model in (1, 2):
+                url, path = _remote_paths_rsky(model, lutbase = rsky_lut, sensor = s)
+                prefetch_jobs.append((url, path))
+
+            ## reverse LUTs - only when computed and supported
+            if compute_reverse and (s is not None) and (s in ac.config['reverse_lut_sensors']):
+                rsr_file = ac.config['data_dir'] + '/RSR/{}.txt'.format(s)
+                try:
+                    _, rsr_bands = ac.shared.rsr_read(rsr_file)
+                except Exception:
+                    rsr_bands = []
+                for base_lut in base_luts:
+                    for par in pars:
+                        for b in rsr_bands:
+                            url, path = _remote_paths_reverse(s, base_lut, par, b)
+                            prefetch_jobs.append((url, path))
+
+        if prefetch_jobs:
+            print('Prefetching up to {} LUT file(s) in parallel'.format(len(prefetch_jobs)))
+            ac.shared.download_files(prefetch_jobs, verbosity = 1)
+
     ## run through wanted sensors
-    for s in sensors:
+    def _load_sensor(s):
         if s is not None:
-            if s in ['L5_TM_B6', 'L7_ETM_B6', 'L8_TIRS', 'L9_TIRS']: continue ## skip thermals
-            if s in ['EO1_ALI_ORANGE', 'L8_OLI_ORANGE', 'L9_OLI_ORANGE']: continue ## skip contrabands
-            if '_CONTRA' in s: continue ## skip contrabands
-            if 'DESIS' in s: continue ## skip DESIS
+            if s in ['L5_TM_B6', 'L7_ETM_B6', 'L8_TIRS', 'L9_TIRS']:
+                return (s, True, None)  ## skip thermals
+            if s in ['EO1_ALI_ORANGE', 'L8_OLI_ORANGE', 'L9_OLI_ORANGE']:
+                return (s, True, None)  ## skip contrabands
+            if '_CONTRA' in s: return (s, True, None)  ## skip contrabands
+            if 'DESIS' in s: return (s, True, None)  ## skip DESIS
 
         print('Testing {}'.format('sensor {}'.format(s) if s is not None else 'generic LUT'))
 
-        ## try getting gas transmittance
-        tg_dict = ac.ac.gas_transmittance(0, 0, uoz=0.3, uwv=1.6, rsr=None if s is None else rsrd[s]['rsr'])
+        try:
+            ## try getting gas transmittance
+            tg_dict = ac.ac.gas_transmittance(0, 0, uoz=0.3, uwv=1.6, rsr=None if s is None else rsrd[s]['rsr'])
 
-        ## get sensor LUT
-        tmp = ac.aerlut.import_luts(sensor = s, get_remote = get_remote, pressures = pressures, par=pars[-1],
-                                    base_luts = base_luts, rsky_lut = rsky_lut)
+            ## get sensor LUT
+            tmp = ac.aerlut.import_luts(sensor = s, get_remote = get_remote, pressures = pressures, par=pars[-1],
+                                        base_luts = base_luts, rsky_lut = rsky_lut)
 
-        ## get reverse LUT
-        if (compute_reverse) & (s is not None) & (s in ac.config['reverse_lut_sensors']):
-            for par in pars:
-                revl = ac.aerlut.reverse_lut(s, get_remote = get_remote, par=par, pressures = pressures,
-                                            base_luts = base_luts, rsky_lut = rsky_lut)
+            ## get reverse LUT
+            if (compute_reverse) & (s is not None) & (s in ac.config['reverse_lut_sensors']):
+                for par in pars:
+                    revl = ac.aerlut.reverse_lut(s, get_remote = get_remote, par=par, pressures = pressures,
+                                                base_luts = base_luts, rsky_lut = rsky_lut)
+        except Exception as exc:
+            return (s, False, exc)
+        return (s, True, None)
+
+    ## per-sensor load loop. Sequential: HDF5/netCDF4 are not thread-safe by
+    ## default, and concurrent reads across sensors caused intermittent
+    ## "Can't open HDF5 attribute" failures. The parallel prefetch above
+    ## already provides the network-side speedup.
+    summaries = []
+    for s in sensors:
+        summaries.append(_load_sensor(s))
+
+    ## report and re-raise on first failure (fail-after-drain)
+    failures = [(s, e) for (s, ok, e) in summaries if not ok]
+    print('acolite_luts: loaded {} sensor(s), {} failed'.format(
+        len(summaries) - len(failures), len(failures)))
+    if failures:
+        s, e = failures[0]
+        raise Exception('acolite_luts: failed to load sensor {}: {}'.format(s, e)) from e
