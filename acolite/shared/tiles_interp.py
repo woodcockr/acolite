@@ -122,13 +122,13 @@ def tiles_pyinterp(data, xnew, ynew, smooth=False, kern_size=2, method='nearest'
     # Set up xarray DataArray
     da = xr.DataArray(cur_data, coords=[y, x], dims=["y", "x"])
     ## set up interpolator
-    grid = pyinterp.backends.xarray.Grid2D(da, geodetic=False)
+    grid = pyinterp.backends.xarray.Grid2D(da)
 
     # Interpolate
     znew = grid.bivariate(coords={
         'x': xi,
         'y': yi
-        }, interpolator=interpolator, num_threads=num_threads)
+        }, method=interpolator, num_threads=num_threads)
 
     # Reshape output
     if target_mask is not None and target_mask_full:
