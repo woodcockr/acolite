@@ -12,6 +12,34 @@
 ##                  2021-07-20 (QV) added retrieval of generic LUTs
 ##                  2021-10-22 (QV) compute ttot if not in LUT
 ##                2023-08-03 (QV) get lut url from ac.config
+##                2026-04-23 (Copilot) extracted _remote_paths_lut helper for prefetch
+
+def _remote_paths_lut(lutid, lutdir, sensor = None, remote_base = None):
+    """Return ``(remote_url, local_path)`` for a single LUT file.
+
+    Generic LUT (``sensor is None``) -> bz2-compressed download path.
+    Sensor LUT -> resampled NetCDF download path.
+    Mirrors the URL/local-path conventions used inside :func:`import_lut`; both
+    the prefetch in ``acolite_luts`` and the regular import path call this so
+    the conventions live in a single place.
+    """
+    import os
+    import acolite as ac
+    if remote_base is None: remote_base = '{}'.format(ac.config['lut_url'])
+    lutnc = lutdir + '/' + lutid + '.nc'
+    if sensor is None:
+        lutncbz2 = '{}.bz2'.format(lutnc)
+        remote_lut = '{}/{}/{}'.format(
+            remote_base, '-'.join(lutid.split('-')[0:3]), os.path.basename(lutncbz2),
+        )
+        return remote_lut, lutncbz2
+    slut = '{}_{}'.format(lutid, sensor)
+    lutnc_s = '{}/{}/{}.nc'.format(lutdir, sensor, slut)
+    remote_lut = '{}/{}/{}/{}.nc'.format(
+        remote_base, '-'.join(lutid.split('-')[0:3]), sensor, slut,
+    )
+    return remote_lut, lutnc_s
+
 
 def import_lut(lutid, lutdir, lut_par = ['utott', 'dtott', 'astot', 'ttot', 'romix'],
                override = False, sensor = None, get_remote = True,
@@ -31,11 +59,10 @@ def import_lut(lutid, lutdir, lut_par = ['utott', 'dtott', 'astot', 'ttot', 'rom
     if sensor is None:
         ## extract bz2 files
         unzipped = False
-        lutncbz2 = '{}.bz2'.format(lutnc)
+        remote_lut, lutncbz2 = _remote_paths_lut(lutid, lutdir, sensor = None, remote_base = remote_base)
 
         ## try downloading LUT from GitHub
         if (not os.path.isfile(lutnc)) & (not os.path.isfile(lutncbz2)) & (get_remote):
-            remote_lut = '{}/{}/{}'.format(remote_base, '-'.join(lutid.split('-')[0:3]), os.path.basename(lutncbz2))
             try:
                 print('Getting remote LUT {}'.format(remote_lut))
                 ac.shared.download_file(remote_lut, lutncbz2)
@@ -107,15 +134,13 @@ def import_lut(lutid, lutdir, lut_par = ['utott', 'dtott', 'astot', 'ttot', 'rom
     ## sensor specific LUT
     else:
         ## sensor LUT NetCDF is stored here
-        lutnc_s='{}/{}/{}_{}.nc'.format(lutdir,sensor,lutid,sensor)
+        remote_lut, lutnc_s = _remote_paths_lut(lutid, lutdir, sensor = sensor, remote_base = remote_base)
         if not os.path.exists(os.path.dirname(lutnc_s)): os.makedirs(os.path.dirname(lutnc_s))
         if (os.path.isfile(lutnc_s)) & (override): os.remove(lutnc_s)
 
         if (not os.path.isfile(lutnc_s)) | (override):
             ## try downloading LUT from GitHub
             if (get_remote):
-                slut = '{}_{}'.format(lutid, sensor)
-                remote_lut = '{}/{}/{}/{}.nc'.format(remote_base, '-'.join(lutid.split('-')[0:3]), sensor, slut)
                 try:
                     print('Getting remote LUT {}'.format(remote_lut))
                     ac.shared.download_file(remote_lut, lutnc_s)

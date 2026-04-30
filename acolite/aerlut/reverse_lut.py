@@ -7,6 +7,23 @@
 ##               2021-10-25 (QV) test if the wind dimension is != 1 or missing
 ##               2023-08-03 (QV) get lut url from ac.config
 ##               2026-01-19 (QV) changed np.product to np.prod
+##               2026-04-23 (Copilot) extracted _remote_paths_reverse helper for prefetch
+
+def _remote_paths_reverse(sensor, base_lut, par, band, remote_base = None):
+    """Return ``(remote_url, local_path)`` for a single reverse-LUT band file.
+    """
+    import acolite as ac
+    if remote_base is None: remote_base = '{}'.format(ac.config['lut_url'])
+    lutdir = '{}/{}-Reverse/{}'.format(
+        ac.config['lut_dir'], '-'.join(base_lut.split('-')[0:3]), sensor,
+    )
+    slut = '{}-reverse-{}-{}-{}'.format(base_lut, sensor, par, band)
+    lutnc = '{}/{}.nc'.format(lutdir, slut)
+    remote_lut = '{}/{}-Reverse/{}/{}.nc'.format(
+        remote_base, '-'.join(base_lut.split('-')[0:3]), sensor, slut,
+    )
+    return remote_lut, lutnc
+
 
 def reverse_lut(sensor, lutdw=None, par = 'romix',
                        pct = (1,60), nbins = 20, override = False,
@@ -46,7 +63,7 @@ def reverse_lut(sensor, lutdw=None, par = 'romix',
 
                 ## try downloading LUT from GitHub
                 if (get_remote):
-                    remote_lut = '{}/{}-Reverse/{}/{}.nc'.format(remote_base, '-'.join(lut.split('-')[0:3]), sensor, slut)
+                    remote_lut, _ = _remote_paths_reverse(sensor, lut, par, b, remote_base = remote_base)
                     try:
                         print('Getting remote LUT {}'.format(remote_lut))
                         ac.shared.download_file(remote_lut, lutnc)
