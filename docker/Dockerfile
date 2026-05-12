@@ -12,6 +12,8 @@ FROM local/easi-workflows-acolite:test
 ARG USERNAME=vscode
 ARG USER_UID=1000
 ARG USER_GID=$USER_UID
+
+USER root
 # Install coverage analysis and asyncio, temp until enabled in base container
 RUN apt-get update && apt-get install -y git-lfs
 RUN /env/bin/pip install pytest-asyncio pytest-cov
@@ -32,6 +34,6 @@ RUN if [ $(getent passwd $USERNAME) ]; then \
         && echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME\
         && chmod 0440 /etc/sudoers.d/$USERNAME; \
     fi
-
+USER $USERNAME
 ENTRYPOINT ["/bin/tini", "-s", "--", "with_bootstrap"]
 CMD ["/bin/bash"]
