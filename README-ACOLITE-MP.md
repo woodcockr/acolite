@@ -22,4 +22,77 @@ For the regression testing acolite `original` and `acolite-mp` were both process
 
 A more complete version of this development may be undertaken given the significant cost savings to be obtained on very large collections. Further performance improvements are possible but require more extensive changes to the file handling. There is also a fair amount of GIL contention which limits threading being caused by some structural choices in the implementation which could be removed.
 
+## Developer environment (internal)
+
+The main development workflow for this branch is a VS Code Dev Container.
+
+### Dev container wiring
+
+- Service: `acolite-mp-dev`
+- Compose files: `docker-compose.yaml` plus `.devcontainer/docker-compose.extend.yaml`
+- Workspace in container: `/home/vscode/acolite-mp`
+- Remote user: `vscode`
+
+The dev image is currently based on a local image in `docker/Dockerfile`:
+
+- `local/easi-workflows-acolite:test`
+
+If that image is missing, the container will not build or start.
+
+### Required mounts and regression data
+
+Current internal defaults:
+
+- Fixture repository bind mount:
+	- Host: `~/dev/aquawatch/acolite_workflow/acolite-mp-fixtures`
+	- Container: `/home/vscode/acolite-mp-fixtures`
+- Workflow output mount:
+	- Host: `~/dev/devcontainers/data`
+	- Container: `/data`
+- Optional AWS credentials:
+	- Host: `~/.aws`
+	- Container: `/home/vscode/.aws`
+
+Regression tests currently expect:
+
+- Fixtures at `/home/vscode/acolite-mp-fixtures/20250600`
+- Workflow outputs under `/data/acolite/test/acolite-mp`
+
+If your local paths differ, update either:
+
+- Dev container mount configuration in `.devcontainer/devcontainer.json`, and/or
+- The fixture path constant in `tests/utils.py`
+
+### Quick start
+
+1. Open this repository in VS Code.
+2. Run `Dev Containers: Reopen in Container`.
+3. Verify mounts exist in the container:
+	 - `/home/vscode/acolite-mp-fixtures/20250600`
+	 - `/data/acolite/test/acolite-mp`
+4. Install dependencies (if needed):
+	 - `uv sync --extra test`
+5. Run the default regression suite:
+	 - `pytest`
+
+Useful targeted commands:
+
+- Single test module: `pytest tests/test_acolite_l2r.py -q`
+- Network-gated LUT prefetch test: `ACOLITE_TEST_NETWORK=1 pytest tests/test_acolite_luts_prefetch.py`
+
+Performance tests are intentionally disabled by default in `tests/test_perf_*.py`.
+
+### Troubleshooting
+
+- Container build fails on base image:
+	- Ensure `local/easi-workflows-acolite:test` exists locally.
+- `Fixture path ... does not exist` failures:
+	- Confirm fixture mount source exists and is mounted to `/home/vscode/acolite-mp-fixtures`.
+- `Input path /data/acolite/test/acolite-mp/... does not exist`:
+	- Confirm the `/data` bind mount contains regression workflow outputs.
+- Network test skipped unexpectedly:
+	- Set `ACOLITE_TEST_NETWORK=1` when running network tests.
+
+For a fuller environment reference, see `docs/plans/development-environment.md`.
+
 
