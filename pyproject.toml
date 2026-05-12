@@ -10,7 +10,7 @@ dependencies = [
     "scipy",
     "numpy",
     "pyhdf",
-    "gdal==3.9.2",
+    "gdal==3.12.3",
     "netcdf4",
     "h5py",
     "pygrib",
