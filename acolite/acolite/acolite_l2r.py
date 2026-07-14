@@ -894,6 +894,7 @@ def acolite_l2r(gem,
     ## setup output file
     ofile = None
     copy_rhot = False
+    sensor_is_s3_ab = str(gem.gatts.get('sensor', '')).startswith(('S3A_', 'S3B_'))
     gemo = None
     if output_file:
         if target_file is None:
@@ -942,6 +943,18 @@ def acolite_l2r(gem,
                 cdata, catts = gem.data(ds, attributes=True)
                 gemo.write(ds, cdata, ds_att=catts)
                 del cdata, catts
+
+            ## copy all rhot datasets from L1R when explicitly requested
+            # copy_rhot is triggered by the effective copy_datasets setting containing 'rhot_*'.
+            # Restrict this custom block to Sentinel-3 A/B, to be safe.
+            if copy_rhot and sensor_is_s3_ab:
+                rhot_ds = [ds for ds in gem.datasets if ds.startswith('rhot_')]
+                for ds in rhot_ds:
+                    if setu['verbosity'] > 1:
+                        print('Writing {}'.format(ds))
+                    cdata, catts = gem.data(ds, attributes=True)
+                    gemo.write(ds, cdata, ds_att=catts)
+                    del cdata, catts
 
         ## write dem
         if setu['dem_pressure_write']:
