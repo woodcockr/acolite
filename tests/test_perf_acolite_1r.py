@@ -30,6 +30,15 @@ import acolite as ac
                 "csiro_settings": "s2_original/csiro_settings"
             },
             id="sentinel2"
+        ),
+        pytest.param(
+            {
+                "key": "sentinel3",
+                "input_path": "s3_original/S3A_OL_1_EFR____20260104T235356_20260104T235656_20260106T003158_0179_134_301_3600_PS1_O_NT_004.SEN3",
+                "l1r_filename": "s3_original/S3A_OLCI_2026_01_04_23_53_55_FR_L1R.nc",
+                "csiro_settings": "s3_original/csiro_settings"
+            },
+            id="sentinel3"
         )
     ]
 )
@@ -75,6 +84,8 @@ def test_acolite_l1r(test_input):
                         result, _ = ac.landsat.l1_convert(input_filename, output=f'{temp_dir}', settings=settings)
                     case "sentinel2":
                         result, _ = ac.sentinel2.l1_convert(input_filename, output=f'{temp_dir}', settings=settings)
+                    case "sentinel3":
+                        result, _ = ac.sentinel3.l1_convert(input_filename, output=f'{temp_dir}', settings=settings)
                     case _:
                         raise ValueError(f"Unknown key {key} in fixtures.")
                 elapsed_time = time.time() - start_time
