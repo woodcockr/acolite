@@ -1,7 +1,14 @@
+import os
+from pathlib import Path
+
 import numpy as np
 
-# Set this variable to the location of the acolite-mp-fixtures repository on your system
-acolite_fixtures_path = "/home/vscode/acolite-mp-fixtures/20250600"
+# Fixtures live in a versioned sibling directory of this repo checkout by default
+# (see scripts/download_fixtures.sh); override with ACOLITE_FIXTURES_DIR if needed.
+_repo_root = Path(__file__).resolve().parents[1]
+_fixtures_version = (_repo_root / "FIXTURES_VERSION").read_text().strip()
+_fixtures_base_dir = Path(os.environ.get("ACOLITE_FIXTURES_DIR", _repo_root.parent / "acolite-mp-fixtures"))
+acolite_fixtures_path = str(_fixtures_base_dir / _fixtures_version)
 
 def arrays_almost_equal(da1, da2, rtol=1e-5, atol=1e-6):
     return (

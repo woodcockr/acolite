@@ -513,7 +513,8 @@ def l1_convert(inputfile, output = None, settings = None, write_l2_err = False):
         if (product_level == 'level1'):
             if setu['verbosity'] > 1: print('Writing TOA reflectance')
 
-            if setu['acolite-mp_l1_convert_max_workers'] == 1:
+            max_workers = int(setu.get('acolite-mp_l1_convert_max_workers', 1))
+            if max_workers <= 1:
                 ## original serial path — unchanged from pre-MP code
                 for iw, band in enumerate(rsr_bands):
                     wave = waves_names[band]
@@ -541,7 +542,6 @@ def l1_convert(inputfile, output = None, settings = None, write_l2_err = False):
                         if setu['verbosity'] > 2: print('Converting bands: Wrote {} ({})'.format('Lt_{}'.format(wave), data[dname].shape))
 
                     ## convert to reflectance
-                    print(mu.shape)
                     d = (np.pi * data[dname] * se2) / (f0*mu)
                     ## write dataset
                     gemo.write(ds, d, ds_att = ds_att)
@@ -554,7 +554,7 @@ def l1_convert(inputfile, output = None, settings = None, write_l2_err = False):
                     for iw, band in enumerate(rsr_bands)
                 ]
 
-                with concurrent.futures.ThreadPoolExecutor(max_workers=setu['acolite-mp_l1_convert_max_workers']) as executor:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                     toa_results = list(executor.map(lambda args: process_band_s3(*args), band_args))
 
                 for ds, d, ds_att, lt_result in toa_results:

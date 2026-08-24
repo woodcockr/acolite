@@ -8,8 +8,8 @@
 	"workspaceFolder": "/home/vscode/acolite-mp",
 	"remoteUser": "vscode",
   "mounts": [
-		"source=~/dev/aquawatch/acolite_workflow/acolite-mp-fixtures,target=/home/vscode/acolite-mp-fixtures,type=bind,consistency=cached",
-],
+		"source=${localWorkspaceFolder}/../acolite-mp-fixtures,target=/home/vscode/acolite-mp-fixtures,type=bind,consistency=cached"
+	],
 "customizations": {
 	"vscode": {
 		"extensions": [
