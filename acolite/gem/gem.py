@@ -18,6 +18,7 @@
 
 import acolite as ac
 import os, sys, json
+import threading
 import numpy as np
 from netCDF4 import Dataset
 
@@ -29,6 +30,9 @@ class gem(object):
             self.store = False
             self.bands = {}
             self.verbosity = verbosity
+
+            ## serialize netCDF/HDF5 reads; the handle is not thread-safe for concurrent access
+            self._read_lock = threading.Lock()
 
             ## nc handle and mode
             self.nc = None
@@ -120,26 +124,33 @@ class gem(object):
                 if ds in self.data_att: catt = self.data_att[ds]
             ## read in dataset
             else:
-                if self.nc_mode != 'r': self.open('r')
-                if ds in self.datasets:
-                    ## get data
-                    if (ds not in self.nc_projection_keys) & (sub is not None):
-                        cdata = self.nc.variables[ds][sub[1]:sub[1]+sub[3]:1,sub[0]:sub[0]+sub[2]:1]
+                ## serialize reads; the netCDF/HDF5 handle is not thread-safe for concurrent access
+                with self._read_lock:
+                    ## another thread may have loaded it while we waited for the lock
+                    if (ds in self.data_mem) & (use_stored):
+                        cdata = self.data_mem[ds]
+                        catt = self.data_att.get(ds, {})
                     else:
-                        cdata = self.nc.variables[ds][:]
-                    ## get attributes
-                    catt = {attr : getattr(self.nc.variables[ds],attr) for attr in self.nc.variables[ds].ncattrs()}
-                    ## mask data
-                    cmask = cdata.mask
-                    cdata = cdata.data
-                    if (ds not in self.nc_projection_keys) & (mask): ## mask if requested
-                        if cdata.dtype in [np.dtype('float32'), np.dtype('float64')]:
-                            cdata[cmask] = np.nan
-                    if (self.store) or (store):
-                        self.data_mem[ds] = cdata
-                        self.data_att[ds] = catt
-                else:
-                    return
+                        if self.nc_mode != 'r': self.open('r')
+                        if ds in self.datasets:
+                            ## get data
+                            if (ds not in self.nc_projection_keys) & (sub is not None):
+                                cdata = self.nc.variables[ds][sub[1]:sub[1]+sub[3]:1,sub[0]:sub[0]+sub[2]:1]
+                            else:
+                                cdata = self.nc.variables[ds][:]
+                            ## get attributes
+                            catt = {attr : getattr(self.nc.variables[ds],attr) for attr in self.nc.variables[ds].ncattrs()}
+                            ## mask data
+                            cmask = cdata.mask
+                            cdata = cdata.data
+                            if (ds not in self.nc_projection_keys) & (mask): ## mask if requested
+                                if cdata.dtype in [np.dtype('float32'), np.dtype('float64')]:
+                                    cdata[cmask] = np.nan
+                            if (self.store) or (store):
+                                self.data_mem[ds] = cdata
+                                self.data_att[ds] = catt
+                        else:
+                            return
 
             ## return_data is set by default
             ## but this method can be used to load all datasets without returning data

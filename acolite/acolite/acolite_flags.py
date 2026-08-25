@@ -116,6 +116,9 @@ def acolite_flags(gem, create_flags_dataset=True, write_flags_dataset=False, ret
         flags = gem.data(flags_name)
 
     ## compute flags
+    # Pre-load rhot datasets so the parallel workers only touch cached in-memory arrays
+    for cur_par in rhot_ds:
+        gem.data(cur_par, store=True, return_data=False)
     # Run compute_non_water_swir_mask and compute_cirrus_mask in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=setu["acolite-mp_acolite_flags_max_workers"]) as executor:
         future_swir = executor.submit(compute_non_water_swir_mask, gem, rhot_ds, rhot_waves, setu)
