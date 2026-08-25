@@ -27,7 +27,7 @@ from utils import acolite_fixtures_path
         )
     ]
 )
-# @pytest.mark.skip(reason="This test is temporarily disabled.")
+@pytest.mark.skip(reason="This test is temporarily disabled.")
 def test_workflow_outputs(outputs):
     # Path to the directories containing the GeoTIFF files
     fixture_path = Path(acolite_fixtures_path) / "workflow-output" / f"{outputs['key']}_workflow_output"

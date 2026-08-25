@@ -6,7 +6,7 @@ import time
 
 import pytest
 import xarray as xr
-from utils import acolite_fixtures_path
+from utils import acolite_fixtures_path, arrays_almost_equal
 
 import acolite as ac
 
@@ -101,9 +101,7 @@ def test_acolite_l1r(test_input):
         result_noatts = result_dataset.drop_attrs(deep=True)
         original_noatts = original_dataset.drop_attrs(deep=True)
 
-        # Check if the datasets are equal
-        # ! May need to replace this with allclose for numerical precision issues in the event of library version changes per other tests
+        # Compare per variable with tolerance; exact equality is not portable across
+        # Python/library builds due to last-bit float rounding (see L2R/L2W tests).
         for k in original_noatts.data_vars:
-            print(f"{k}, result: {result_noatts[k].equals(original_noatts[k])}")
-
-        assert result_dataset.equals(original_dataset), "Output dataset does not equal the original dataset."
+            assert arrays_almost_equal(result_noatts[k], original_noatts[k]), f"Arrays differ for variable {k}!"
