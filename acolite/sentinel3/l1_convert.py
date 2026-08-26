@@ -20,6 +20,49 @@
 ##                2025-02-07 (QV) added tile merging
 ##                2025-02-08 (QV) fixed for full tile merging
 ##                2025-03-19 (QV) added s3_product_type, added s3_product_type to oname
+##                2026-06-19 (MP) added parallelisation for band conversion using ThreadPoolExecutor
+
+import concurrent.futures
+import datetime
+import numpy as np
+
+
+def process_band_s3(iw, band, waves_names, dnames, bnames, data, meta, di, mu, se2, ttg, setu, bands_data, verbosity):
+    """Compute TOA reflectance (and optionally Lt) for one Sentinel-3/OLCI band.
+
+    Called in parallel via ThreadPoolExecutor.  All inputs are read-only
+    numpy arrays / dicts; no shared mutable state is modified.
+    Returns (ds, d, ds_att, lt_result) where lt_result is None unless
+    setu['output_lt'] is True.
+    """
+    wave = waves_names[band]
+    dname = dnames[iw]
+
+    # per pixel f0
+    f0 = meta['instrument_data']['solar_flux'][iw][di]
+    # if smile corrected use nominal E0
+    if setu['smile_correction']:
+        f0 = bands_data[band]['E0']
+
+    ds_att = {'wavelength': float(wave)}
+    for key in ttg:
+        ds_att[key] = ttg[key][bnames[iw]]
+
+    # optional Lt
+    lt_result = None
+    if setu['output_lt']:
+        lt_result = ('Lt_{}'.format(wave), data[dname].copy(), dict(ds_att))
+
+    # convert to reflectance
+    d = (np.pi * data[dname] * se2) / (f0 * mu)
+
+    ds = 'rhot_{}'.format(wave)
+    if verbosity > 2:
+        print('{} - Computed TOA reflectance for {} nm'.format(
+            datetime.datetime.now().isoformat()[0:19], wave))
+
+    return (ds, d, ds_att, lt_result)
+
 
 def l1_convert(inputfile, output = None, settings = None, write_l2_err = False):
 
@@ -469,38 +512,58 @@ def l1_convert(inputfile, output = None, settings = None, write_l2_err = False):
         ## read TOA
         if (product_level == 'level1'):
             if setu['verbosity'] > 1: print('Writing TOA reflectance')
-            for iw, band in enumerate(rsr_bands):
-                wave = waves_names[band]
-                ds = 'rhot_{}'.format(wave)
-                if setu['verbosity'] > 2: print('{} - Reading TOA data for {} nm'.format(datetime.datetime.now().isoformat()[0:19], wave), end='\n')
 
-                # per pixel wavelength
-                l = meta['instrument_data']['lambda0'][iw][di]
-                # per pixel f0
-                f0 = meta['instrument_data']['solar_flux'][iw][di]
-                # if smile corrected use nominal E0
-                if setu['smile_correction']: f0 = bands_data[band]['E0']
+            max_workers = int(setu.get('acolite-mp_l1_convert_max_workers', 1))
+            if max_workers <= 1:
+                ## original serial path — unchanged from pre-MP code
+                for iw, band in enumerate(rsr_bands):
+                    wave = waves_names[band]
+                    ds = 'rhot_{}'.format(wave)
+                    if setu['verbosity'] > 2: print('{} - Reading TOA data for {} nm'.format(datetime.datetime.now().isoformat()[0:19], wave), end='\n')
 
-                # per pixel fwhm
-                fwhm = meta['instrument_data']['FWHM'][iw][di]
+                    # per pixel wavelength
+                    l = meta['instrument_data']['lambda0'][iw][di]
+                    # per pixel f0
+                    f0 = meta['instrument_data']['solar_flux'][iw][di]
+                    # if smile corrected use nominal E0
+                    if setu['smile_correction']: f0 = bands_data[band]['E0']
 
-                dname = dnames[iw]
+                    # per pixel fwhm
+                    fwhm = meta['instrument_data']['FWHM'][iw][di]
 
-                ds_att  = {'wavelength':float(wave)}
-                for key in ttg: ds_att[key]=ttg[key][bnames[iw]]
+                    dname = dnames[iw]
 
-                ## write toa radiance
-                if setu['output_lt']:
-                    gemo.write('Lt_{}'.format(wave), data[dname], ds_att = ds_att)
-                    if setu['verbosity'] > 2: print('Converting bands: Wrote {} ({})'.format('Lt_{}'.format(wave), data[dname].shape))
+                    ds_att  = {'wavelength':float(wave)}
+                    for key in ttg: ds_att[key]=ttg[key][bnames[iw]]
 
-                ## convert to reflectance
-                print(mu.shape)
-                d = (np.pi * data[dname] * se2) / (f0*mu)
-                ## write dataset
-                gemo.write(ds, d, ds_att = ds_att)
-                if setu['verbosity'] > 2: print('Converting bands: Wrote {} ({})'.format(ds, d.shape))
-                d = None
+                    ## write toa radiance
+                    if setu['output_lt']:
+                        gemo.write('Lt_{}'.format(wave), data[dname], ds_att = ds_att)
+                        if setu['verbosity'] > 2: print('Converting bands: Wrote {} ({})'.format('Lt_{}'.format(wave), data[dname].shape))
+
+                    ## convert to reflectance
+                    d = (np.pi * data[dname] * se2) / (f0*mu)
+                    ## write dataset
+                    gemo.write(ds, d, ds_att = ds_att)
+                    if setu['verbosity'] > 2: print('Converting bands: Wrote {} ({})'.format(ds, d.shape))
+                    d = None
+            else:
+                ## parallel path (acolite-mp_l1_convert_max_workers > 1)
+                band_args = [
+                    (iw, band, waves_names, dnames, bnames, data, meta, di, mu, se2, ttg, setu, bands_data, setu['verbosity'])
+                    for iw, band in enumerate(rsr_bands)
+                ]
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    toa_results = list(executor.map(lambda args: process_band_s3(*args), band_args))
+
+                for ds, d, ds_att, lt_result in toa_results:
+                    if lt_result is not None:
+                        lt_ds, lt_data, lt_ds_att = lt_result
+                        gemo.write(lt_ds, lt_data, ds_att=lt_ds_att)
+                        if setu['verbosity'] > 2: print('Converting bands: Wrote {} ({})'.format(lt_ds, lt_data.shape))
+                    gemo.write(ds, d, ds_att=ds_att)
+                    if setu['verbosity'] > 2: print('Converting bands: Wrote {} ({})'.format(ds, d.shape))
 
         if (product_level == 'level2'):
             if setu['verbosity'] > 1: print('Writing water reflectance')

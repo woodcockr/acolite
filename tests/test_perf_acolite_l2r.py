@@ -31,6 +31,15 @@ import acolite as ac
                 "settings": "s2_original/csiro_settings"
             },
             id="sentinel2"
+        ),
+        pytest.param(
+            {
+                "key": "sentinel3",
+                "gem": "s3_original/S3A_OLCI_2026_01_04_23_53_55_FR_L1R.nc",
+                "original_dataset_filename": "s3_original/S3A_OLCI_2026_01_04_23_53_55_FR_L2R.nc",
+                "settings": "s3_original/csiro_settings"
+            },
+            id="sentinel3"
         )
     ]
 )

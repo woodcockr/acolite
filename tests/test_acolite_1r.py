@@ -6,7 +6,7 @@ import time
 
 import pytest
 import xarray as xr
-from utils import acolite_fixtures_path
+from utils import acolite_fixtures_path, arrays_almost_equal
 
 import acolite as ac
 
@@ -31,6 +31,15 @@ import acolite as ac
                 "csiro_settings": "s2_original/csiro_settings"
             },
             id="sentinel2"
+        ),
+        pytest.param(
+            {
+                "key": "sentinel3",
+                "input_path": "s3_original/S3A_OL_1_EFR____20260104T235356_20260104T235656_20260106T003158_0179_134_301_3600_PS1_O_NT_004.SEN3",
+                "l1r_filename": "s3_original/S3A_OLCI_2026_01_04_23_53_55_FR_L1R.nc",
+                "csiro_settings": "s3_original/csiro_settings"
+            },
+            id="sentinel3"
         )
     ]
 )
@@ -69,6 +78,8 @@ def test_acolite_l1r(test_input):
                 result, _ = ac.landsat.l1_convert(input_filename, output=f'{temp_dir}', settings=settings)
             case "sentinel2":
                 result, _ = ac.sentinel2.l1_convert(input_filename, output=f'{temp_dir}', settings=settings)
+            case "sentinel3":
+                result, _ = ac.sentinel3.l1_convert(input_filename, output=f'{temp_dir}', settings=settings)
             case _:
                 raise ValueError(f"Unknown key {key} in fixtures.")
         elapsed_time = time.time() - start_time
@@ -90,9 +101,7 @@ def test_acolite_l1r(test_input):
         result_noatts = result_dataset.drop_attrs(deep=True)
         original_noatts = original_dataset.drop_attrs(deep=True)
 
-        # Check if the datasets are equal
-        # ! May need to replace this with allclose for numerical precision issues in the event of library version changes per other tests
+        # Compare per variable with tolerance; exact equality is not portable across
+        # Python/library builds due to last-bit float rounding (see L2R/L2W tests).
         for k in original_noatts.data_vars:
-            print(f"{k}, result: {result_noatts[k].equals(original_noatts[k])}")
-
-        assert result_dataset.equals(original_dataset), "Output dataset does not equal the original dataset."
+            assert arrays_almost_equal(result_noatts[k], original_noatts[k]), f"Arrays differ for variable {k}!"

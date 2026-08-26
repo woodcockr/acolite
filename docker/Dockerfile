@@ -15,7 +15,7 @@ ARG USER_GID=$USER_UID
 
 USER root
 # Install coverage analysis and asyncio, temp until enabled in base container
-RUN apt-get update && apt-get install -y git-lfs
+RUN apt-get update && apt-get install -y git-lfs ripgrep
 RUN /env/bin/pip install pytest-asyncio pytest-cov
 # Create a non-root user to use if not already available - see https://aka.ms/vscode-remote/containers/non-root-user.
 RUN if [ $(getent passwd $USERNAME) ]; then \

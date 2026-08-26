@@ -1,9 +1,10 @@
-# Default compose will create an ows image, with dev settings and connect to a local db
+# Builds the acolite-mp dev container image and mounts AWS credentials plus a
+# configurable host directory (ACOLITE_DATA_DIR, see .env.example) for workflow outputs.
 services:
   acolite-mp-dev:
     build: docker
     user: vscode
     volumes:
       - ~/.aws:/home/vscode/.aws
-      - ~/dev/devcontainers/data:/data
+      - ${ACOLITE_DATA_DIR:-../acolite-mp-data}:/data
     restart: no

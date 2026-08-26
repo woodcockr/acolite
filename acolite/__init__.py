@@ -115,13 +115,64 @@ else:
             dt = datetime.datetime.fromtimestamp(st.st_mtime)
             gd[f] = dt.isoformat()[0:19]
 
+        ## resolve the actual commit hash from HEAD (handles both detached HEAD and branch refs)
+        def _resolve_commit(gitdir):
+            head_file = '{}/HEAD'.format(gitdir)
+            try:
+                with open(head_file, 'r') as _f:
+                    head_content = _f.read().strip()
+                if head_content.startswith('ref: '):
+                    ref_path = '{}/{}'.format(gitdir, head_content[5:])
+                    if os.path.exists(ref_path):
+                        with open(ref_path, 'r') as _f:
+                            return _f.read().strip()[:8]
+                elif len(head_content) >= 8:
+                    return head_content[:8]
+            except Exception:
+                pass
+            return None
+
+        ## resolve a tag pointing at the current commit (packed-refs + loose refs/tags)
+        def _resolve_tag(gitdir, commit_hash):
+            if not commit_hash:
+                return None
+            try:
+                # check loose tag refs first
+                tags_dir = '{}/refs/tags'.format(gitdir)
+                if os.path.isdir(tags_dir):
+                    for tag_name in os.listdir(tags_dir):
+                        tag_file = '{}/{}'.format(tags_dir, tag_name)
+                        with open(tag_file, 'r') as _f:
+                            tag_hash = _f.read().strip()
+                        if tag_hash.startswith(commit_hash):
+                            return tag_name
+                # fall back to packed-refs
+                packed = '{}/packed-refs'.format(gitdir)
+                if os.path.exists(packed):
+                    with open(packed, 'r') as _f:
+                        for line in _f:
+                            line = line.strip()
+                            if line.startswith('#'):
+                                continue
+                            parts = line.split()
+                            if len(parts) == 2 and parts[0].startswith(commit_hash) and 'refs/tags/' in parts[1]:
+                                return parts[1].split('refs/tags/')[-1]
+            except Exception:
+                pass
+            return None
+
+        commit_hash = _resolve_commit(gitdir)
+        tag = _resolve_tag(gitdir, commit_hash)
+
         version_long = ''
         if 'HEAD' in gd:
+            suffix = ' ({}{})'.format(commit_hash, ', tag: {}'.format(tag) if tag else '') if commit_hash else ''
             version_long+='clone {}'.format(gd['HEAD'])
-            version = 'Generic GitHub Clone c{}'.format(gd['HEAD'])
+            version = 'Generic GitHub Clone c{}{}'.format(gd['HEAD'], suffix)
         if 'FETCH_HEAD' in gd:
+            suffix = ' ({}{})'.format(commit_hash, ', tag: {}'.format(tag) if tag else '') if commit_hash else ''
             version_long+=' pull {}'.format(gd['FETCH_HEAD'])
-            version = 'Generic GitHub Clone p{}'.format(gd['FETCH_HEAD'])
+            version = 'Generic GitHub Clone p{}{}'.format(gd['FETCH_HEAD'], suffix)
 
 ## replace $ACDIR in config by ac.path
 for t in config:

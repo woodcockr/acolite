@@ -1669,24 +1669,6 @@ def acolite_l2r(gem,
                     T_USER, T_SWIR1, T_SWIR2, setu, segment_data, rhog_ref, use_swir1, gemo
                 )
 
-                # Write the outputs if we are not returning a gem object otherwise skip this for performance
-                # Store rhot if needed
-                if copy_rhot:
-                    rhot_ds = [ds for ds in gem.datasets if 'rhot_' in ds]
-                    for ds in rhot_ds:
-                        to_gem_mem(gemo, ds, gem.data_mem[ds],gem.data_att[ds])
-                for ds in gemo.datasets:
-                    if not return_gem:
-                        # write out everything in gemo.data_mem
-                        gemo.write_ds(ds)
-                    elif ds not in gemo.data_mem:
-                        # load anything this is missing from gemo.data_mem
-                        # WIP This should be refactored to make it unnecessary by fixing earlier code that nukes it
-                        gemo.data(ds, store=True, return_data=False)
-                        # WIP why doesn't gem.data update the datasets?
-                        if ds not in gemo.datasets:
-                            gemo.datasets.append(ds)
-
                 del sub_gc, rhog_ref
                 if gc_user is not None:
                     del T_USER
@@ -1694,6 +1676,23 @@ def acolite_l2r(gem,
                     del T_SWIR1, T_SWIR2, use_swir1
             del Rf_sen, omega, muv, mus
     ## end glint correction
+
+    # Store rhot if needed, then flush all band datasets to file (or into memory for return_gem).
+    # This must run unconditionally — output finalization cannot depend on whether glint correction ran.
+    if copy_rhot:
+        rhot_ds = [ds for ds in gem.datasets if 'rhot_' in ds]
+        for ds in rhot_ds:
+            to_gem_mem(gemo, ds, gem.data_mem[ds], gem.data_att[ds])
+    for ds in gemo.datasets:
+        if not return_gem:
+            # write out everything in gemo.data_mem
+            gemo.write_ds(ds)
+        elif ds not in gemo.data_mem:
+            # WIP This should be refactored to make it unnecessary by fixing earlier code that nukes it
+            gemo.data(ds, store=True, return_data=False)
+            # WIP why doesn't gem.data update the datasets?
+            if ds not in gemo.datasets:
+                gemo.datasets.append(ds)
 
     ## alternative glint correction
     if (ac_opt == 'dsf') & (setu['dsf_residual_glint_correction']) & (setu['dsf_aot_estimate'] in ['fixed', 'segmented']) &\
